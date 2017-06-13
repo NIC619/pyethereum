@@ -42,6 +42,12 @@ print("Epoch initialized")
 print("Reward factor: %.8f" % (casper.get_reward_factor() * 2 / 3))
 # Send a prepare message
 # configure_logging(config_string=config_string)
+
+# apply event listener
+# event_listener_output = []
+# print(t.head_state.block_number)
+# t.head_state.log_listeners.append(lambda f: event_listener_output.append(casper.translator.listen(f)))
+
 casper.prepare(mk_prepare(0, 1, epoch_blockhash(1), epoch_blockhash(0), 0, epoch_blockhash(0), k0))
 print('Gas consumed for a prepare: %d (including %d intrinsic gas)' %
       (t.head_state.receipts[-1].gas_used, t.last_tx.intrinsic_gas_used))
@@ -49,6 +55,11 @@ epoch_1_anchash = utils.sha3(epoch_blockhash(1) + epoch_blockhash(0))
 assert casper.get_consensus_messages__hash_justified(1, epoch_blockhash(1))
 assert casper.get_consensus_messages__ancestry_hash_justified(1, epoch_1_anchash)
 print("Prepare message processed")
+
+# use state receipt to get log data
+print("first prepare log: ")
+print(t.head_state.receipts[-1].logs[0].data)
+
 try:
     casper.prepare(mk_prepare(0, 1, epoch_blockhash(1), epoch_blockhash(0), 0, epoch_blockhash(0), k0))
     success = True
@@ -64,6 +75,13 @@ print('Gas consumed for a commit: %d (including %d intrinsic gas)' %
 # Check that we committed
 assert casper.get_consensus_messages__committed(1)
 print("Commit message processed")
+
+# use state receipt to get log data
+print("first commit log: ")
+print(t.head_state.receipts[-1].logs[0].data)
+# print(event_listener_output)
+assert False # break
+
 # Initialize the second epoch
 mine_epochs(1)
 # Check that the dynasty increased as expected
