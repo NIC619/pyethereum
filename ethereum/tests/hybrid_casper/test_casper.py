@@ -59,6 +59,8 @@ print("Prepare message processed")
 # use state receipt to get log data
 print("first prepare log: ")
 print(t.head_state.receipts[-1].logs[0].data)
+print(t.head_state.receipts[-1].logs[1].data)
+print(t.head_state.receipts[-1].logs[2].data)
 
 try:
     casper.prepare(mk_prepare(0, 1, epoch_blockhash(1), epoch_blockhash(0), 0, epoch_blockhash(0), k0))
@@ -79,6 +81,8 @@ print("Commit message processed")
 # use state receipt to get log data
 print("first commit log: ")
 print(t.head_state.receipts[-1].logs[0].data)
+print(t.head_state.receipts[-1].logs[1].data)
+print(t.head_state.receipts[-1].logs[2].data)
 # print(event_listener_output)
 assert False # break
 
