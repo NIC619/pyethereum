@@ -21,7 +21,7 @@ try:
 except ImportError:
     ETHASH_LIB = 'ethash'
     warnings.warn('using pure python implementation', ImportWarning)
-
+ETHASH_LIB = 'ethash'
 if ETHASH_LIB == 'ethash':
     mkcache = ethash.mkcache
     EPOCH_LENGTH = 30000
@@ -101,13 +101,13 @@ class Miner():
 
     def mine(self, rounds=1000, start_nonce=0):
         blk = self.block
-        bin_nonce, mixhash = mine(blk.number, blk.difficulty, blk.mining_hash,
+        bin_nonce, mixhash, cmix = mine(blk.number, blk.difficulty, blk.mining_hash,
                                   start_nonce=start_nonce, rounds=rounds)
         if bin_nonce:
             blk.header.mixhash = mixhash
             blk.header.nonce = bin_nonce
             # assert blk.check_pow()
-            return blk
+            return blk, cmix
 
 
 def mine(block_number, difficulty, mining_hash, start_nonce=0, rounds=1000):
@@ -122,7 +122,7 @@ def mine(block_number, difficulty, mining_hash, start_nonce=0, rounds=1000):
             log.debug("nonce found")
             assert len(bin_nonce) == 8
             assert len(o[b"mix digest"]) == 32
-            return bin_nonce, o[b"mix digest"]
-    return None, None
+            return bin_nonce, o[b"mix digest"], o[b"cmix"]
+    return None, None, None
 
 

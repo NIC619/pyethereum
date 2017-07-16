@@ -44,7 +44,7 @@ class Chain(object):
             assert env is None
             self.state = genesis
             self.env = self.state.env
-            print('Initializing chain from provided state')
+            # print('Initializing chain from provided state')
             reset_genesis = True
         elif "extraData" in genesis:
             self.state = state_from_genesis_declaration(
@@ -250,7 +250,7 @@ class Chain(object):
             return False
         # Is the block being added to the head?
         if block.header.prevhash == self.head_hash:
-            log.info('Adding to head', head=encode_hex(block.header.prevhash))
+            # log.info('Adding to head', head=encode_hex(block.header.prevhash))
             self.state.deletes = []
             self.state.changed = {}
             try:
@@ -365,10 +365,10 @@ class Chain(object):
         self.add_child(block)
         self.db.put('head_hash', self.head_hash)
         self.db.put(block.hash, rlp.encode(block))
-        self.db.put(b'changed:'+block.hash, b''.join(list(changed.keys())))
-        print('Saved %d address change logs' % len(changed.keys()))
+        self.db.put(b'changed:'+block.hash, b''.join([k.encode() for k in list(changed.keys())]))
+        # print('Saved %d address change logs' % len(changed.keys()))
         self.db.put(b'deletes:'+block.hash, b''.join(deletes))
-        print('Saved %d trie node deletes for block %d (%s)' % (len(deletes), block.number, utils.encode_hex(block.hash)))
+        # print('Saved %d trie node deletes for block %d (%s)' % (len(deletes), block.number, utils.encode_hex(block.hash)))
         # Delete old junk data
         old_block_hash = self.get_blockhash_by_number(block.number - self.max_history)
         if old_block_hash:
@@ -385,9 +385,9 @@ class Chain(object):
                 pass
         self.db.commit()
         assert (b'deletes:'+block.hash) in self.db
-        log.info('Added block %d (%s) with %d txs and %d gas' % \
-            (block.header.number, encode_hex(block.header.hash)[:8],
-             len(block.transactions), block.header.gas_used))
+        #  log.info('Added block %d (%s) with %d txs and %d gas' % \
+        #     (block.header.number, encode_hex(block.header.hash)[:8],
+        #      len(block.transactions), block.header.gas_used))
         # Call optional callback
         if self.new_head_cb and block.header.number != 0:
             self.new_head_cb(block)
