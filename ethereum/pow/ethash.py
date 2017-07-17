@@ -1,6 +1,6 @@
 import copy
 import sys
-
+from ethereum.pow.ethash_utils import *
 
 if sys.version_info.major == 2:
     from repoze.lru import lru_cache
@@ -9,7 +9,6 @@ else:
 
 
 cache_seeds = [b'\x00' * 32]
-
 
 def mkcache(block_number):
     while len(cache_seeds) <= block_number // EPOCH_LENGTH:
@@ -76,8 +75,9 @@ def hashimoto(header, nonce, full_size, dataset_lookup):
     for i in range(0, len(mix), 4):
         cmix.append(fnv(fnv(fnv(mix[i], mix[i + 1]), mix[i + 2]), mix[i + 3]))
     return {
-        "mix digest": serialize_hash(cmix),
-        "result": serialize_hash(sha3_256(s + cmix))
+        b"mix digest": serialize_hash(cmix),
+        b"result": serialize_hash(sha3_256(s + cmix)),
+        b"cmix": cmix
     }
 
 

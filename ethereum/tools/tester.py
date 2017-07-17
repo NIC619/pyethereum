@@ -57,7 +57,7 @@ from ethereum.abi import ContractTranslator
 import types
 
 STARTGAS = 3141592
-GASPRICE = 0
+GASPRICE = 1
 
 from ethereum.slogging import configure_logging
 config_string = ':info'
@@ -163,16 +163,28 @@ class Chain(object):
     def mine(self, number_of_blocks=1, coinbase=a0):
         self.cs.finalize(self.head_state, self.block)
         set_execution_results(self.head_state, self.block)
-        self.block = Miner(self.block).mine(rounds=100, start_nonce=0)
+        cmix_list = []
+        cmix_header = {}
+        self.block, cmix_header["cmix"] = Miner(self.block).mine(rounds=100, start_nonce=0)
+        cmix_header["block_number"] = self.block.header.number
+        cmix_header["header"] = encode_hex(rlp.encode(self.block.header))
+        cmix_list.append(cmix_header)
+        
         assert self.chain.add_block(self.block)
         assert self.head_state.trie.root_hash == self.chain.state.trie.root_hash
         for i in range(1, number_of_blocks):
             b, _ = make_head_candidate(self.chain, timestamp=self.chain.state.timestamp + 14)
-            b = Miner(b).mine(rounds=100, start_nonce=0)
+            cmix_header = dict()
+            b, cmix_header["cmix"] = Miner(b).mine(rounds=100, start_nonce=0)
+            cmix_header["block_number"] = b.header.number
+            cmix_header["header"] = encode_hex(rlp.encode(b.header))
+            cmix_list.append(cmix_header)
             assert self.chain.add_block(b)
+        print(cmix_list)
         self.block = mk_block_from_prevstate(self.chain, timestamp=self.chain.state.timestamp + 14)
         self.head_state = self.chain.state.ephemeral_clone()
         self.cs.initialize(self.head_state, self.block)
+        
 
     def snapshot(self):
         self.head_state.commit()
