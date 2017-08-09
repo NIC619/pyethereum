@@ -165,22 +165,23 @@ class Chain(object):
         set_execution_results(self.head_state, self.block)
         cmix_list = []
         cmix_header = {}
-        self.block, cmix_header["cmix"] = Miner(self.block).mine(rounds=100, start_nonce=0)
-        cmix_header["block_number"] = self.block.header.number
+        self.block, cmix_header["cmix"] = Miner(self.block).mine(rounds=10000, start_nonce=0)
         cmix_header["header"] = encode_hex(rlp.encode(self.block.header))
         cmix_list.append(cmix_header)
         
         assert self.chain.add_block(self.block)
+        cmix_header["block_hash"] = encode_hex(self.chain.get_blockhash_by_number(self.block.header.number))
         assert self.head_state.trie.root_hash == self.chain.state.trie.root_hash
         for i in range(1, number_of_blocks):
             b, _ = make_head_candidate(self.chain, timestamp=self.chain.state.timestamp + 14)
             cmix_header = dict()
-            b, cmix_header["cmix"] = Miner(b).mine(rounds=100, start_nonce=0)
-            cmix_header["block_number"] = b.header.number
+            b, cmix_header["cmix"] = Miner(b).mine(rounds=10000, start_nonce=0)
             cmix_header["header"] = encode_hex(rlp.encode(b.header))
             cmix_list.append(cmix_header)
             assert self.chain.add_block(b)
-        print(cmix_list)
+            cmix_header["block_hash"] = encode_hex(self.chain.get_blockhash_by_number(b.header.number))
+        sample_json = {"sample_list": cmix_list}
+        print(sample_json)
         self.block = mk_block_from_prevstate(self.chain, timestamp=self.chain.state.timestamp + 14)
         self.head_state = self.chain.state.ephemeral_clone()
         self.cs.initialize(self.head_state, self.block)

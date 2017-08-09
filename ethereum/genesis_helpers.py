@@ -112,7 +112,7 @@ def mk_basic_state(alloc, header=None, env=None, executing_on_head=False):
     if not header:
         header = {
             "number": 0, "gas_limit": env.config['BLOCK_GAS_LIMIT'],
-            "gas_used": 0, "timestamp": 1467446877, "difficulty": 1,
+            "gas_used": 0, "timestamp": 1467446877, "difficulty": 98,
             "uncles_hash": '0x'+encode_hex(BLANK_UNCLES_HASH)
         }
     h = BlockHeader(number=parse_as_int(header['number']),
