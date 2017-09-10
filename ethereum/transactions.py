@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import rlp
-from rlp.sedes import big_endian_int, binary
+from rlp.sedes import big_endian_int, binary, CountableList
 from rlp.utils import str_to_bytes, ascii_chr
 from ethereum.utils import encode_hex
 
@@ -24,7 +24,7 @@ class Transaction(rlp.Serializable):
 
     """
     A transaction is stored as:
-    [nonce, gasprice, startgas, to, value, data, v, r, s]
+    [nonce, gasprice, startgas, to, value, data, v, r, s, read_list, write_list]
 
     nonce is the number of transactions already sent by that account, encoded
     in binary form (eg.  0 -> '', 7 -> '\x07', 1000 -> '\x03\xd8').
@@ -50,14 +50,20 @@ class Transaction(rlp.Serializable):
         ('v', big_endian_int),
         ('r', big_endian_int),
         ('s', big_endian_int),
+        ('read_list', CountableList(utils.address)),
+        ('write_list', CountableList(utils.address)),
     ]
 
     _sender = None
 
     def __init__(self, nonce, gasprice, startgas,
-                 to, value, data, v=0, r=0, s=0):
+                 to, value, data, v=0, r=0, s=0, read_list=None, write_list=None):
         self.data = None
-
+        if not read_list:
+            read_list = []
+        if not write_list:
+            write_list =[]
+        
         to = utils.normalize_address(to, allow_blank=True)
 
         super(
@@ -71,13 +77,13 @@ class Transaction(rlp.Serializable):
             data,
             v,
             r,
-            s)
+            s,
+            read_list,
+            write_list)
 
         if self.gasprice >= TT256 or self.startgas >= TT256 or \
                 self.value >= TT256 or self.nonce >= TT256:
             raise InvalidTransaction("Values way too high!")
-        
-        print("Transaction created")
 
     @property
     def sender(self):
@@ -198,6 +204,9 @@ class Transaction(rlp.Serializable):
     def check_low_s_homestead(self):
         if self.s > secpk1n // 2 or self.s == 0:
             raise InvalidTransaction("Invalid signature S value!")
-
+    
+    @property
+    def read_write_union_list(self):
+        return list(set(self.read_list).union(self.write_list))
 
 UnsignedTransaction = Transaction.exclude(['v', 'r', 's'])

@@ -199,7 +199,14 @@ def apply_transaction(state, tx):
             if tx.startgas < intrinsic_gas:
                 raise InsufficientStartGas(
                     rp(tx, 'startgas', tx.startgas, intrinsic_gas))
-
+    
+    # READ_ADDRESS_GAS cost
+    intrinsic_gas += opcodes.GREADADDRESS * len(tx.read_write_union_list)
+    # print("%d more intrinsic gas added" % (opcodes.GREADADDRESS * len(tx.read_write_union_list)))
+    # READ_BYTE_GAS cost
+    intrinsic_gas += opcodes.GREADBYTE * sum([len(state.get_code(addr)) + 64 for addr in tx.read_write_union_list])
+    # print("%d more intrinsic gas added" % (opcodes.GREADBYTE * sum([len(state.get_code(addr)) + 64 for addr in tx.read_write_union_list])))
+    
     log_tx.debug('TX NEW', txdict=tx.to_dict())
 
     # start transacting #################
@@ -336,6 +343,8 @@ class VMExt():
         self.reset_storage = state.reset_storage
         self.tx_origin = tx.sender if tx else '\x00' * 20
         self.tx_gasprice = tx.gasprice if tx else 0
+        self.read_list = tx.read_list
+        self.write_list = tx.write_list
 
 
 def apply_msg(ext, msg):
@@ -361,7 +370,7 @@ def _apply_msg(ext, msg, code):
             log_msg.debug('MSG TRANSFER FAILED', have=ext.get_balance(msg.to),
                           want=msg.value)
             return 1, msg.gas, []
-
+            
     # Main loop
     if msg.code_address in ext.specials:
         res, gas, dat = ext.specials[msg.code_address](ext, msg)
@@ -395,6 +404,8 @@ def create_contract(ext, msg):
     else:
         nonce = utils.encode_int(ext.get_nonce(msg.sender) - 1)
         msg.to = utils.mk_contract_address(msg.sender, nonce)
+    # Add to write list
+    ext.write_list.append(msg.to)
 
     if ext.post_constantinople_hardfork() and (
             ext.get_nonce(msg.to) or len(ext.get_code(msg.to))):

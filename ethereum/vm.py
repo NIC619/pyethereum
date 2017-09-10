@@ -217,7 +217,7 @@ def vm_execute(ext, msg, code):
             return vm_exception('INVALID OP (not yet enabled)', opcode=opcode)
 
         op, in_args, out_args, fee = opcodes.opcodes[opcode]
-
+        
         # Apply operation
         compustate.gas -= fee
         compustate.pc += 1
@@ -383,6 +383,7 @@ def vm_execute(ext, msg, code):
                                    opcodes.BALANCE_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
+                assert addr in [utils.coerce_addr_to_hex(a) for a in ext.read_list]
                 stk.append(ext.get_balance(addr))
             elif op == 'ORIGIN':
                 stk.append(utils.coerce_to_int(ext.tx_origin))
@@ -433,6 +434,7 @@ def vm_execute(ext, msg, code):
                                    opcodes.EXTCODELOAD_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
+                assert addr in [utils.coerce_addr_to_hex(a) for a in ext.read_list]
                 stk.append(len(ext.get_code(addr) or b''))
             elif op == 'EXTCODECOPY':
                 if ext.post_anti_dos_hardfork():
@@ -440,6 +442,7 @@ def vm_execute(ext, msg, code):
                                    opcodes.EXTCODELOAD_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
+                assert addr in [utils.coerce_addr_to_hex(a) for a in ext.read_list]
                 start, s2, size = stk.pop(), stk.pop(), stk.pop()
                 extcode = ext.get_code(addr) or b''
                 assert utils.is_string(extcode)
@@ -496,12 +499,14 @@ def vm_execute(ext, msg, code):
                 if ext.post_anti_dos_hardfork():
                     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
+                assert msg.to in ext.read_list
                 stk.append(ext.get_storage_data(msg.to, stk.pop()))
             elif op == 'SSTORE':
                 s0, s1 = stk.pop(), stk.pop()
                 if msg.static:
                     return vm_exception(
                         'Cannot SSTORE inside a static context')
+                assert msg.to in ext.write_list
                 if ext.get_storage_data(msg.to, s0):
                     gascost = opcodes.GSTORAGEMOD if s1 else opcodes.GSTORAGEKILL
                     refund = 0 if s1 else opcodes.GSTORAGEREFUND
