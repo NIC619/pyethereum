@@ -76,6 +76,8 @@ class Transaction(rlp.Serializable):
         if self.gasprice >= TT256 or self.startgas >= TT256 or \
                 self.value >= TT256 or self.nonce >= TT256:
             raise InvalidTransaction("Values way too high!")
+        
+        print("Transaction created")
 
     @property
     def sender(self):
