@@ -150,9 +150,7 @@ class State(object):
             to=to,
             value=value,
             data=data,
-            gas=startgas,
-            read_list=read_list,
-            write_list=write_list)
+            gas=startgas)
         if result is None:
             raise TransactionFailed()
         return result
@@ -206,9 +204,7 @@ class Chain(object):
             to=to,
             value=value,
             data=data,
-            gas=startgas,
-            read_list=read_list,
-            write_list=write_list)
+            gas=startgas)
         if result is None:
             raise TransactionFailed()
         return result

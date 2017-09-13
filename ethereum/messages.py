@@ -181,6 +181,7 @@ def apply_message(state, msg=None, **kwargs):
     else:
         assert not kwargs
     ext = VMExt(state, transactions.Transaction(0, 0, 21000, b'', 0, b''))
+    ext.is_call = True
     result, gas_remained, data = apply_msg(ext, msg)
     return bytearray_to_bytestr(data) if result else None
 
@@ -360,8 +361,10 @@ class VMExt():
         self.reset_storage = state.reset_storage
         self.tx_origin = tx.sender if tx else '\x00' * 20
         self.tx_gasprice = tx.gasprice if tx else 0
+        self.is_call = False
         self.read_list = tx.read_list if tx else []
         self.write_list = tx.write_list if tx else []
+        self.storage_modified_list = []
 
 
 def apply_msg(ext, msg):
@@ -403,7 +406,7 @@ def _apply_msg(ext, msg, code):
     if res == 0:
         log_msg.debug('REVERTING')
         ext.revert(snapshot)
-
+    # print("storage modified list:", ext.storage_modified_list)
     return res, gas, dat
 
 
