@@ -190,7 +190,7 @@ def vm_execute(ext, msg, code):
     # Check read access of msg.to
     if not ext.is_call and msg.to not in ext.read_list and msg.to not in ext.specials:
         return vm_exception("READ ACCESS VIOLATION")
-    
+
     # precompute trace flag
     # if we trace vm, we're in slow mode anyway
     trace_vm = log_vm_op.is_active('trace')
@@ -389,6 +389,8 @@ def vm_execute(ext, msg, code):
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
                 if not ext.is_call and addr not in [utils.coerce_addr_to_hex(a) for a in ext.read_list]:
                     return vm_exception("READ ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_read_list.add(utils.decode_hex(addr))
                 stk.append(ext.get_balance(addr))
             elif op == 'ORIGIN':
                 if not ext.is_call and ext.tx_origin not in ext.read_list:
@@ -445,6 +447,8 @@ def vm_execute(ext, msg, code):
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
                 if not ext.is_call and addr not in [utils.coerce_addr_to_hex(a) for a in ext.read_list]:
                     return vm_exception("READ ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_read_list.add(utils.decode_hex(addr))
                 stk.append(len(ext.get_code(addr) or b''))
             elif op == 'EXTCODECOPY':
                 if ext.post_anti_dos_hardfork():
@@ -454,6 +458,8 @@ def vm_execute(ext, msg, code):
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
                 if not ext.is_call and addr not in [utils.coerce_addr_to_hex(a) for a in ext.read_list]:
                     return vm_exception("READ ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_read_list.add(utils.decode_hex(addr))
                 start, s2, size = stk.pop(), stk.pop(), stk.pop()
                 extcode = ext.get_code(addr) or b''
                 assert utils.is_string(extcode)
@@ -510,6 +516,10 @@ def vm_execute(ext, msg, code):
                 if ext.post_anti_dos_hardfork():
                     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
+                if not ext.is_call and msg.to not in ext.read_list:
+                    return vm_exception("READ ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_read_list.add(msg.to)
                 stk.append(ext.get_storage_data(msg.to, stk.pop()))
             elif op == 'SSTORE':
                 s0, s1 = stk.pop(), stk.pop()
@@ -518,6 +528,8 @@ def vm_execute(ext, msg, code):
                         'Cannot SSTORE inside a static context')
                 if not ext.is_call and msg.to not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_write_list.add(msg.to)
                 if ext.get_storage_data(msg.to, s0):
                     gascost = opcodes.GSTORAGEMOD if s1 else opcodes.GSTORAGEKILL
                     refund = 0 if s1 else opcodes.GSTORAGEREFUND
@@ -601,6 +613,8 @@ def vm_execute(ext, msg, code):
                 new_address = utils.mk_contract_address(msg.to, ext.get_nonce(msg.to))
                 if not ext.is_call and new_address not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_write_list.add(new_address)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1)
                 o, gas, data = ext.create(create_msg)
                 if o:
@@ -632,6 +646,10 @@ def vm_execute(ext, msg, code):
                     not mem_extend(mem, compustate, op, memoutstart, memoutsz):
                 return vm_exception('OOG EXTENDING MEMORY')
             to = utils.int_to_addr(to)
+            if not ext.is_call and to not in ext.read_list and to not in ext.specials:
+                    return vm_exception("READ ACCESS VIOLATION")
+            if ext.is_call and to not in ext.specials:
+                ext.record_read_list.add(to)
             # Extra gas costs based on various factors
             extra_gas = 0
             # Creating a new account
@@ -642,6 +660,8 @@ def vm_execute(ext, msg, code):
             if value > 0:
                 if not ext.is_call and to not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.is_call:
+                    ext.record_write_list.add(to)
                 extra_gas += opcodes.GCALLVALUETRANSFER
             # Cost increased from 40 to 700 in Tangerine Whistle
             if ext.post_anti_dos_hardfork():
@@ -720,6 +740,8 @@ def vm_execute(ext, msg, code):
             to = ((b'\x00' * (32 - len(to))) + to)[12:]
             if not ext.is_call and to not in ext.write_list or msg.to not in ext.write_list:
                 return vm_exception("WRITE ACCESS VIOLATION")
+            if ext.is_call:
+                ext.record_write_list |= set([to, msg.to])
             xfer = ext.get_balance(msg.to)
             if ext.post_anti_dos_hardfork():
                 extra_gas = opcodes.SUICIDE_SUPPLEMENTAL_GAS + \

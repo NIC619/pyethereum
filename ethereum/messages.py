@@ -182,8 +182,16 @@ def apply_message(state, msg=None, **kwargs):
         assert not kwargs
     ext = VMExt(state, transactions.Transaction(0, 0, 21000, b'', 0, b''))
     ext.is_call = True
+    # Add msg.sender, msg.to and new contract address to record r/w list
+    if msg.to != b'':
+        ext.record_read_list = set([msg.sender, msg.to])
+        ext.record_write_list = set([msg.sender, msg.to])
+    else:
+        new_address = utils.mk_contract_address(msg.sender, state.get_nonce(msg.sender))
+        ext.record_read_list = set([msg.sender, msg.to, new_address])
+        ext.record_write_list = set([msg.sender, msg.to, new_address])
     result, gas_remained, data = apply_msg(ext, msg)
-    return bytearray_to_bytestr(data) if result else None
+    return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list) if result else (None, [], [])
 
 
 def apply_transaction(state, tx):
@@ -361,10 +369,12 @@ class VMExt():
         self.reset_storage = state.reset_storage
         self.tx_origin = tx.sender if tx else '\x00' * 20
         self.tx_gasprice = tx.gasprice if tx else 0
-        self.is_call = False
+        self.is_call = False                # flag indicating if this is a call, modified in `apply_message`
         self.read_list = set(tx.read_list) if tx else set()
         self.write_list = set(tx.write_list) if tx else set()
-        self.storage_modified_list = set()
+        self.storage_modified_list = set()  # list of accounts whose storage is modified
+        self.record_read_list = set()       # list of accounts that are read from
+        self.record_write_list = set()      # list of accounts that are written to
 
 
 def apply_msg(ext, msg):

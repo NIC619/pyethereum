@@ -144,7 +144,7 @@ class State(object):
     def call(self, sender=k0, to=b'\x00' * 20, value=0,
              data=b'', startgas=STARTGAS, gasprice=GASPRICE, read_list=None, write_list=None):
         sender_addr = privtoaddr(sender)
-        result = apply_message(
+        result, r_list, wr_list = apply_message(
             self.state.ephemeral_clone(),
             sender=sender_addr,
             to=to,
@@ -198,7 +198,7 @@ class Chain(object):
     def call(self, sender=k0, to=b'\x00' * 20, value=0,
              data=b'', startgas=STARTGAS, gasprice=GASPRICE, read_list=None, write_list=None):
         sender_addr = privtoaddr(sender)
-        result = apply_message(
+        result, r_list, wr_list = apply_message(
             self.head_state.ephemeral_clone(),
             sender=sender_addr,
             to=to,
