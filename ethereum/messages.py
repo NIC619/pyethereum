@@ -191,6 +191,23 @@ def apply_transaction(state, tx):
     state.refunds = 0
     validate_transaction(state, tx)
 
+    # OPTION1: add msg.sender, msg.to, new contract address to read/write list if not included already
+    if tx.to != b'':
+        tx.read_list = list(set(tx.read_list) | set([tx.sender, tx.to]))
+        tx.write_list = list(set(tx.write_list) | set([tx.sender, tx.to]))
+    else:
+        new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
+        tx.read_list = list(set(tx.read_list) | set([tx.sender, new_address]))
+        tx.write_list = list(set(tx.write_list) | set([tx.sender, new_address]))
+    # OPTION 2: throw excetion directly if these address not included in read/write list
+    # if tx.to != b'':
+    #     if not set([tx.sender, tx.to]).issubset(set(tx.read_write_union_list)):
+    #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
+    # else:
+    #     new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
+    #     if not set([tx.sender, tx.to, new_address]).issubset(set(tx.read_write_union_list)):
+    #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
+
     intrinsic_gas = tx.intrinsic_gas_used
     # READ_ADDRESS_GAS cost
     intrinsic_gas += opcodes.GREADADDRESS * len(tx.read_write_union_list)
@@ -404,9 +421,7 @@ def create_contract(ext, msg):
     else:
         nonce = utils.encode_int(ext.get_nonce(msg.sender) - 1)
         msg.to = utils.mk_contract_address(msg.sender, nonce)
-    if msg.to not in ext.write_list:
-        log_msg.debug("WRITE ACCESS VIOLATION")
-        return 0, 0, b''
+
 
     if ext.post_constantinople_hardfork() and (
             ext.get_nonce(msg.to) or len(ext.get_code(msg.to))):
