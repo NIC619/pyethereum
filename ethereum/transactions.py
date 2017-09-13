@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import rlp
-from rlp.sedes import big_endian_int, binary, CountableList
+from rlp.sedes import big_endian_int, binary, List, Serializable
 from rlp.utils import str_to_bytes, ascii_chr
 from ethereum.utils import encode_hex
 
@@ -50,8 +50,8 @@ class Transaction(rlp.Serializable):
         ('v', big_endian_int),
         ('r', big_endian_int),
         ('s', big_endian_int),
-        ('read_list', CountableList(utils.address)),
-        ('write_list', CountableList(utils.address)),
+        ('read_list', Serializable(utils.address)),
+        ('write_list', Serializable(utils.address)),
     ]
 
     _sender = None
@@ -207,6 +207,6 @@ class Transaction(rlp.Serializable):
     
     @property
     def read_write_union_list(self):
-        return list(set(self.read_list).union(self.write_list))
+        return set(self.read_list).union(self.write_list)
 
 UnsignedTransaction = Transaction.exclude(['v', 'r', 's'])
