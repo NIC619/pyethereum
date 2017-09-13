@@ -530,7 +530,6 @@ def vm_execute(ext, msg, code):
                 # adds neg gascost as a refund if below zero
                 ext.add_refund(refund)
                 ext.set_storage_data(msg.to, s0, s1)
-                print("SSTORE at", msg.to)
                 ext.storage_modified_list.append(msg.to)
             elif op == 'JUMP':
                 compustate.pc = stk.pop()

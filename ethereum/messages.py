@@ -406,7 +406,6 @@ def _apply_msg(ext, msg, code):
     if res == 0:
         log_msg.debug('REVERTING')
         ext.revert(snapshot)
-    # print("storage modified list:", ext.storage_modified_list)
     return res, gas, dat
 
 
