@@ -65,22 +65,19 @@ class Account(rlp.Serializable):
         self.env = env
         self.address = address
         super(Account, self).__init__(nonce, balance, storage, code_hash)
-        self.storage_cache = {}
-        self.storage_trie = SecureTrie(Trie(RefcountDB(self.env.db)))
-        self.storage_trie.root_hash = self.storage
+        self.storage_cache = bytearray()
+        # self.storage_trie = SecureTrie(Trie(RefcountDB(self.env.db)))
+        # self.storage_trie.root_hash = self.storage
         self.touched = False
         self.existent_at_start = True
         self._mutable = True
         self.deleted = False
 
     def commit(self):
-        for k, v in self.storage_cache.items():
-            if v:
-                self.storage_trie.update(utils.encode_int32(k), rlp.encode(v))
-            else:
-                self.storage_trie.delete(utils.encode_int32(k))
-        self.storage_cache = {}
-        self.storage = self.storage_trie.root_hash
+        key = utils.sha3(self.address + utils.str_to_bytes("storage"))
+        self.env.db.put(key, self.storage_cache)
+        self.storage = utils.sha3(self.storage_cache)
+        self.storage_cache = bytearray()
 
     @property
     def code(self):
@@ -94,15 +91,17 @@ class Account(rlp.Serializable):
         # to a suicide
         self.env.db.put(self.code_hash, value)
 
-    def get_storage_data(self, key):
-        if key not in self.storage_cache:
-            v = self.storage_trie.get(utils.encode_int32(key))
-            self.storage_cache[key] = utils.big_endian_to_int(
-                rlp.decode(v) if v else b'')
-        return self.storage_cache[key]
+    def get_storage_data(self):
+        if self.storage_cache:
+            return self.storage_cache
+        else:
+            key = utils.sha3(self.address + utils.str_to_bytes("storage"))
+            if self.env.db._has_key(key):
+                self.storage_cache = self.env.db.get(key) 
+        return self.storage_cache
 
-    def set_storage_data(self, key, value):
-        self.storage_cache[key] = value
+    def set_storage_data(self, value):
+        self.storage_cache = value
 
     @classmethod
     def blank_account(cls, env, address, initial_nonce=0):
@@ -122,12 +121,8 @@ class Account(rlp.Serializable):
         return True
 
     def to_dict(self):
-        odict = self.storage_trie.to_dict()
-        for k, v in self.storage_cache.items():
-            odict[utils.encode_int(k)] = rlp.encode(utils.encode_int(v))
         return {'balance': str(self.balance), 'nonce': str(self.nonce), 'code': '0x' + encode_hex(self.code),
-                'storage': {'0x' + encode_hex(key.lstrip(b'\x00') or b'\x00'):
-                            '0x' + encode_hex(rlp.decode(val)) for key, val in odict.items()}}
+                'storage': str(bytes(self.get_storage_data()))}
 
 
 # from ethereum.state import State
@@ -231,15 +226,15 @@ class State():
         self.set_and_journal(acct, 'nonce', newnonce)
         self.set_and_journal(acct, 'touched', True)
 
-    def get_storage_data(self, address, key):
+    def get_storage_data(self, address):
         return self.get_and_cache_account(
-            utils.normalize_address(address)).get_storage_data(key)
+            utils.normalize_address(address)).get_storage_data()
 
-    def set_storage_data(self, address, key, value):
+    def set_storage_data(self, address, value):
         acct = self.get_and_cache_account(utils.normalize_address(address))
-        preval = acct.get_storage_data(key)
-        acct.set_storage_data(key, value)
-        self.journal.append(lambda: acct.set_storage_data(key, preval))
+        preval = acct.get_storage_data()
+        acct.set_storage_data(value)
+        self.journal.append(lambda: acct.set_storage_data(preval))
         self.set_and_journal(acct, 'touched', True)
 
     def add_suicide(self, address):
@@ -361,7 +356,6 @@ class State():
         for addr, acct in self.cache.items():
             if acct.touched or acct.deleted:
                 acct.commit()
-                self.deletes.extend(acct.storage_trie.deletes)
                 self.changed[addr] = True
                 if self.account_exists(addr) or allow_empties:
                     self.trie.update(addr, rlp.encode(acct))
@@ -402,15 +396,15 @@ class State():
     def reset_storage(self, address):
         acct = self.get_and_cache_account(address)
         pre_cache = acct.storage_cache
-        acct.storage_cache = {}
+        acct.storage_cache = bytearray()
         self.journal.append(lambda: setattr(acct, 'storage_cache', pre_cache))
-        pre_root = acct.storage_trie.root_hash
+        pre_root = acct.storage
         self.journal.append(
             lambda: setattr(
-                acct.storage_trie,
-                'root_hash',
+                acct,
+                'storage',
                 pre_root))
-        acct.storage_trie.root_hash = BLANK_ROOT
+        acct.storage = BLANK_ROOT
 
     # Creates a snapshot from a state
     def to_snapshot(self, root_only=False, no_prevblocks=False):
@@ -456,9 +450,7 @@ class State():
                 if 'nonce' in data:
                     state.set_nonce(addr, parse_as_int(data['nonce']))
                 if 'storage' in data:
-                    for k, v in data['storage'].items():
-                        state.set_storage_data(
-                            addr, parse_as_bin(k), parse_as_bin(v))
+                    state.set_storage_data(addr, data['storage'])
         elif "state_root" in snapshot_data:
             state.trie.root_hash = parse_as_bin(snapshot_data["state_root"])
         else:

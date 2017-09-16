@@ -513,6 +513,10 @@ def vm_execute(ext, msg, code):
                     return vm_exception('OOG EXTENDING MEMORY')
                 mem[s0] = s1 % 256
             elif op == 'SLOAD':
+                s0 = stk.pop()
+                storage = ext.get_storage_data(msg.to)
+                if s0 > len(storage) // 32:
+                    return vm_exception("STORAGE OUT OF BOUND")
                 if ext.post_anti_dos_hardfork():
                     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
@@ -520,7 +524,7 @@ def vm_execute(ext, msg, code):
                     return vm_exception("READ ACCESS VIOLATION")
                 if ext.is_call:
                     ext.record_read_list.add(msg.to)
-                stk.append(ext.get_storage_data(msg.to, stk.pop()))
+                stk.append(utils.big_endian_to_int(storage[s0*32 : s0*32+32 ]))
             elif op == 'SSTORE':
                 s0, s1 = stk.pop(), stk.pop()
                 if msg.static:
@@ -530,18 +534,22 @@ def vm_execute(ext, msg, code):
                     return vm_exception("WRITE ACCESS VIOLATION")
                 if ext.is_call:
                     ext.record_write_list.add(msg.to)
-                if ext.get_storage_data(msg.to, s0):
-                    gascost = opcodes.GSTORAGEMOD if s1 else opcodes.GSTORAGEKILL
-                    refund = 0 if s1 else opcodes.GSTORAGEREFUND
+                # ACCESS COST
+                if msg.to in ext.storage_modified_list:
+                    gascost = 100
                 else:
-                    gascost = opcodes.GSTORAGEADD if s1 else opcodes.GSTORAGEMOD
-                    refund = 0
-                if compustate.gas < gascost:
-                    return vm_exception('OUT OF GAS')
-                compustate.gas -= gascost
-                # adds neg gascost as a refund if below zero
-                ext.add_refund(refund)
-                ext.set_storage_data(msg.to, s0, s1)
+                    gascost = opcodes.GACCOUNTEDITCOST
+                storage = ext.get_storage_data(msg.to)
+                # EXPANSION COST
+                if s0 >= len(storage) // 32:
+                    expandsize = (s0+1) * 32 - len(storage)
+                    gascost += expandsize * opcodes.GEXPANDBYTE
+                    if compustate.gas < gascost:
+                        return vm_exception('OUT OF GAS')
+                    compustate.gas -= gascost
+                    storage.extend(bytearray(expandsize))
+                storage[s0*32 : s0*32 + 32] = utils.encode_int32(s1)
+                ext.set_storage_data(msg.to, storage)
                 ext.storage_modified_list.add(msg.to)
             elif op == 'JUMP':
                 compustate.pc = stk.pop()
@@ -771,8 +779,8 @@ class VmExtBase():
         self.get_code = lambda addr: b''
         self.get_balance = lambda addr: 0
         self.set_balance = lambda addr, balance: 0
-        self.set_storage_data = lambda addr, key, value: 0
-        self.get_storage_data = lambda addr, key: 0
+        self.set_storage_data = lambda addr, value: 0
+        self.get_storage_data = lambda addr: 0
         self.log_storage = lambda addr: 0
         self.add_suicide = lambda addr: 0
         self.add_refund = lambda x: 0
