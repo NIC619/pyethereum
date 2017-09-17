@@ -512,6 +512,14 @@ def vm_execute(ext, msg, code):
                 if not mem_extend(mem, compustate, op, s0, 1):
                     return vm_exception('OOG EXTENDING MEMORY')
                 mem[s0] = s1 % 256
+            elif op == 'MCOPY':
+                memfromstart, memfromsz, memtostart = \
+                    stk.pop(), stk.pop(), stk.pop()
+                if not mem_extend(mem, compustate, op, memtostart, memfromsz):
+                    return vm_exception('OOG EXTENDING MEMORY')
+                if not data_copy(compustate, memfromsz):
+                    return vm_exception('OOG COPY DATA')
+                mem[memtostart : memtostart+memfromsz] = mem[memfromstart : memfromstart+memfromsz]
             elif op == 'SLOAD':
                 if ext.post_anti_dos_hardfork():
                     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
@@ -708,6 +716,11 @@ def vm_execute(ext, msg, code):
                 else:
                     raise Exception("Lolwut")
                 # Get result
+                if call_msg.code_address == b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04':
+                    mem[memoutstart : memoutstart+memoutsz] = mem[meminstart : meminstart+meminsz]
+                    stk.append(1)
+                    compustate.gas += submsg_gas
+                    continue
                 result, gas, data = ext.msg(call_msg)
                 if result == 0:
                     stk.append(0)
