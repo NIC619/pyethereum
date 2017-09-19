@@ -181,7 +181,7 @@ def apply_message(state, msg=None, **kwargs):
     else:
         assert not kwargs
     ext = VMExt(state, transactions.Transaction(0, 0, 21000, b'', 0, b''))
-    ext.is_call = True
+    ext.gathering_mode = True
     # Add msg.sender, msg.to and new contract address to record r/w list
     if msg.to != b'':
         ext.record_read_list = set([msg.sender, msg.to])
@@ -369,12 +369,14 @@ class VMExt():
         self.reset_storage = state.reset_storage
         self.tx_origin = tx.sender if tx else '\x00' * 20
         self.tx_gasprice = tx.gasprice if tx else 0
-        self.is_call = False                # flag indicating if this is a call, modified in `apply_message`
+        # self.gathering_mode is used to indicate that vm will be
+        # gathering accounts that data are read from/written to.
+        self.gathering_mode = False
         self.read_list = set(tx.read_list) if tx else set()
         self.write_list = set(tx.write_list) if tx else set()
         self.storage_modified_list = set()  # list of accounts whose storage is modified
-        self.record_read_list = set()       # list of accounts that are read from
-        self.record_write_list = set()      # list of accounts that are written to
+        self.record_read_list = set()       # list of accounts that data are read from
+        self.record_write_list = set()      # list of accounts that data are written to
 
 
 def apply_msg(ext, msg):
