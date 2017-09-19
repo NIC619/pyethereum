@@ -399,9 +399,9 @@ def _apply_msg(ext, msg, code):
     snapshot = ext.snapshot()
     if msg.transfers_value:
         if not ext.transfer_value(msg.sender, msg.to, msg.value):
-            log_msg.debug('MSG TRANSFER FAILED', have=ext.get_balance(msg.to),
+            log_msg.debug('MSG TRANSFER FAILED', have=ext.get_balance(msg.sender),
                           want=msg.value)
-            return 1, msg.gas, []
+            return 0, msg.gas, []
             
     # Main loop
     if msg.code_address in ext.specials:
