@@ -74,8 +74,7 @@ class Account(rlp.Serializable):
         self.deleted = False
 
     def commit(self):
-        key = utils.sha3(self.address + utils.str_to_bytes("storage"))
-        self.env.db.put(key, self.storage_cache)
+        self.env.db.put(utils.sha3(self.storage_cache), self.storage_cache)
         self.storage = utils.sha3(self.storage_cache)
         self.storage_cache = bytearray()
 
@@ -95,9 +94,8 @@ class Account(rlp.Serializable):
         if self.storage_cache:
             return self.storage_cache
         else:
-            key = utils.sha3(self.address + utils.str_to_bytes("storage"))
-            if self.env.db._has_key(key):
-                self.storage_cache = self.env.db.get(key) 
+            if self.env.db._has_key(self.storage):
+                self.storage_cache = self.env.db.get(self.storage) 
         return self.storage_cache
 
     def set_storage_data(self, value):
