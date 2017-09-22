@@ -74,8 +74,8 @@ class Account(rlp.Serializable):
         self.deleted = False
 
     def commit(self):
-        self.env.db.put(utils.sha3(self.storage_cache), self.storage_cache)
-        self.storage = utils.sha3(self.storage_cache)
+        self.env.db.put(utils.sha3(bytes(self.storage_cache)), self.storage_cache)
+        self.storage = utils.sha3(bytes(self.storage_cache))
         self.storage_cache = bytearray()
 
     @property
