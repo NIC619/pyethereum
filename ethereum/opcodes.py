@@ -64,6 +64,8 @@ opcodes = {
     0xa2: ['LOG2', 4, 0, 1125],
     0xa3: ['LOG3', 5, 0, 1500],
     0xa4: ['LOG4', 6, 0, 1875],
+    # MCOPY: basic gas cost is 3+3(MLOAD+MSTORE), more is charged based on length of data to copy
+    0xe0: ['MCOPY', 3, 0, 6],
     # 0xe1: ['SLOADBYTES', 3, 0, 50], # to be discontinued
     # 0xe2: ['SSTOREBYTES', 3, 0, 0], # to be discontinued
     # 0xe3: ['SSIZE', 1, 1, 50], # to be discontinued
