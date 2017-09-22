@@ -587,9 +587,7 @@ def vm_execute(ext, msg, code):
                     return vm_exception('OUT OF GAS')
                 compustate.gas -= gascost
                 for i in range(msize_rounded // 32):
-                    print("memory to be copied:", mem[mstart+i*32 : mstart+(i+1)*32])
-                    print("storage slots to be copied to: %d" % (sstart+i))
-                    storage[(sstart+i)*32 : (sstart+i)*32 + 32] = utils.encode_int32(mem[mstart+i*32 : mstart+(i+1)*32])
+                    storage[(sstart+i)*32 : (sstart+i)*32 + 32] = mem[mstart+i*32 : mstart+(i+1)*32]
                 ext.set_storage_data(msg.to, storage)
                 ext.storage_modified_list.add(msg.to)
             elif op == 'JUMP':
