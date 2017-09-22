@@ -389,7 +389,7 @@ def vm_execute(ext, msg, code):
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
                 if not ext.gathering_mode and addr not in [utils.coerce_addr_to_hex(a) for a in ext.read_list]:
                     return vm_exception("READ ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_read_list.add(utils.decode_hex(addr))
                 stk.append(ext.get_balance(addr))
             elif op == 'ORIGIN':
@@ -447,7 +447,7 @@ def vm_execute(ext, msg, code):
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
                 if not ext.gathering_mode and addr not in [utils.coerce_addr_to_hex(a) for a in ext.read_list]:
                     return vm_exception("READ ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_read_list.add(utils.decode_hex(addr))
                 stk.append(len(ext.get_code(addr) or b''))
             elif op == 'EXTCODECOPY':
@@ -458,7 +458,7 @@ def vm_execute(ext, msg, code):
                 addr = utils.coerce_addr_to_hex(stk.pop() % 2**160)
                 if not ext.gathering_mode and addr not in [utils.coerce_addr_to_hex(a) for a in ext.read_list]:
                     return vm_exception("READ ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_read_list.add(utils.decode_hex(addr))
                 start, s2, size = stk.pop(), stk.pop(), stk.pop()
                 extcode = ext.get_code(addr) or b''
@@ -530,7 +530,7 @@ def vm_execute(ext, msg, code):
                         return vm_exception("OUT OF GAS")
                 if not ext.gathering_mode and msg.to not in ext.read_list:
                     return vm_exception("READ ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_read_list.add(msg.to)
                 stk.append(utils.big_endian_to_int(storage[s0*32 : s0*32+32 ]))
             elif op == 'SSTORE':
@@ -540,7 +540,7 @@ def vm_execute(ext, msg, code):
                         'Cannot SSTORE inside a static context')
                 if not ext.gathering_mode and msg.to not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_write_list.add(msg.to)
                 # ACCESS COST
                 if msg.to in ext.storage_modified_list:
@@ -557,6 +557,39 @@ def vm_execute(ext, msg, code):
                     compustate.gas -= gascost
                     storage.extend(bytearray(expandsize))
                 storage[s0*32 : s0*32 + 32] = utils.encode_int32(s1)
+                ext.set_storage_data(msg.to, storage)
+                ext.storage_modified_list.add(msg.to)
+            elif op == 'SCOPY':
+                mstart, msize, sstart = stk.pop(), stk.pop(), stk.pop()
+                msize_rounded = utils.ceil32(msize)
+                if not mem_extend(mem, compustate, op, mstart, msize_rounded):
+                    return vm_exception('OOG EXTENDING MEMORY')
+                if msg.static:
+                    return vm_exception(
+                        'Cannot SSTORE inside a static context')
+                if not ext.gathering_mode and msg.to not in ext.write_list:
+                    return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.gathering_mode:
+                    ext.record_write_list.add(msg.to)
+                # ACCESS COST
+                if msg.to in ext.storage_modified_list:
+                    gascost = 100
+                else:
+                    gascost = opcodes.GACCOUNTEDITCOST
+                gascost -= 3
+                storage = ext.get_storage_data(msg.to)
+                # EXPANSION COST
+                expandsize = (sstart) * 32 + msize_rounded - len(storage)
+                if expandsize > 0:
+                    gascost += expandsize * opcodes.GEXPANDBYTE
+                    storage.extend(bytearray(expandsize))
+                if compustate.gas < gascost:
+                    return vm_exception('OUT OF GAS')
+                compustate.gas -= gascost
+                for i in range(msize_rounded // 32):
+                    print("memory to be copied:", mem[mstart+i*32 : mstart+(i+1)*32])
+                    print("storage slots to be copied to: %d" % (sstart+i))
+                    storage[(sstart+i)*32 : (sstart+i)*32 + 32] = utils.encode_int32(mem[mstart+i*32 : mstart+(i+1)*32])
                 ext.set_storage_data(msg.to, storage)
                 ext.storage_modified_list.add(msg.to)
             elif op == 'JUMP':
@@ -629,7 +662,7 @@ def vm_execute(ext, msg, code):
                 new_address = utils.mk_contract_address(msg.to, ext.get_nonce(msg.to))
                 if not ext.gathering_mode and new_address not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_write_list.add(new_address)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1)
                 o, gas, data = ext.create(create_msg)
@@ -676,7 +709,7 @@ def vm_execute(ext, msg, code):
             if value > 0:
                 if not ext.gathering_mode and to not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
-                if ext.is_call:
+                if ext.gathering_mode:
                     ext.record_write_list.add(to)
                 extra_gas += opcodes.GCALLVALUETRANSFER
             # Cost increased from 40 to 700 in Tangerine Whistle
@@ -761,7 +794,7 @@ def vm_execute(ext, msg, code):
             to = ((b'\x00' * (32 - len(to))) + to)[12:]
             if not ext.gathering_mode and to not in ext.write_list or msg.to not in ext.write_list:
                 return vm_exception("WRITE ACCESS VIOLATION")
-            if ext.is_call:
+            if ext.gathering_mode:
                 ext.record_write_list |= set([to, msg.to])
             xfer = ext.get_balance(msg.to)
             if ext.post_anti_dos_hardfork():
