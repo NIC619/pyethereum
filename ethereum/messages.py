@@ -194,7 +194,7 @@ def apply_message(state, msg=None, **kwargs):
     return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list) if result else (None, [], [])
 
 
-def apply_transaction(state, tx):
+def apply_transaction(state, tx, salt=None):
     state.logs = []
     state.suicides = []
     state.refunds = 0
@@ -205,7 +205,10 @@ def apply_transaction(state, tx):
         tx.read_list = set(tx.read_list) | set([tx.sender, tx.to])
         tx.write_list = set(tx.write_list) | set([tx.sender, tx.to])
     else:
-        new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
+        if state.is_CONSTANTINOPLE():
+            new_address = utils.mk_metropolis_contract_address(tx.sender, salt, tx.data)
+        else:
+            new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
         tx.read_list = set(tx.read_list) | set([tx.sender, new_address])
         tx.write_list = set(tx.write_list) | set([tx.sender, new_address])
     # OPTION 2: throw excetion directly if these address not included in read/write list
@@ -251,7 +254,8 @@ def apply_transaction(state, tx):
         tx.startgas -
         intrinsic_gas,
         message_data,
-        code_address=tx.to)
+        code_address=tx.to,
+        salt=salt)
 
     # MESSAGE
     ext = VMExt(state, tx)
@@ -429,9 +433,11 @@ def create_contract(ext, msg):
     if ext.tx_origin != msg.sender:
         ext.increment_nonce(msg.sender)
 
-    if ext.post_constantinople_hardfork() and msg.sender == null_address:
-        msg.to = utils.mk_contract_address(msg.sender, 0)
-        # msg.to = sha3(msg.sender + code)[12:]
+    if ext.post_constantinople_hardfork():
+        if msg.sender == null_address:
+            msg.to = utils.mk_contract_address(msg.sender, 0)
+        else:
+            msg.to = utils.mk_metropolis_contract_address(msg.sender, msg.salt, code)
     else:
         nonce = utils.encode_int(ext.get_nonce(msg.sender) - 1)
         msg.to = utils.mk_contract_address(msg.sender, nonce)
