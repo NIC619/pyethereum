@@ -549,6 +549,7 @@ def vm_execute(ext, msg, code):
                     gascost = 100
                 else:
                     gascost = opcodes.GACCOUNTEDITCOST
+                    ext.storage_modified_list.add(msg.to)
                 storage = ext.get_storage_data(msg.to)
                 # EXPANSION COST
                 if s0 >= len(storage) // 32:
@@ -560,7 +561,6 @@ def vm_execute(ext, msg, code):
                     storage.extend(bytearray(expandsize))
                 storage[s0*32 : s0*32 + 32] = utils.encode_int32(s1)
                 ext.set_storage_data(msg.to, storage)
-                ext.storage_modified_list.add(msg.to)
             elif op == 'SCOPY':
                 mstart, msize, sstart = stk.pop(), stk.pop(), stk.pop()
                 msize_rounded = utils.ceil32(msize)
@@ -578,6 +578,7 @@ def vm_execute(ext, msg, code):
                     gascost = 100
                 else:
                     gascost = opcodes.GACCOUNTEDITCOST
+                    ext.storage_modified_list.add(msg.to)
                 gascost -= 3
                 storage = ext.get_storage_data(msg.to)
                 # EXPANSION COST
@@ -591,7 +592,6 @@ def vm_execute(ext, msg, code):
                 for i in range(msize_rounded // 32):
                     storage[(sstart+i)*32 : (sstart+i)*32 + 32] = mem[mstart+i*32 : mstart+(i+1)*32]
                 ext.set_storage_data(msg.to, storage)
-                ext.storage_modified_list.add(msg.to)
             elif op == 'JUMP':
                 compustate.pc = stk.pop()
                 if compustate.pc >= codelen or not (

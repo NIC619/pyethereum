@@ -216,7 +216,10 @@ def apply_transaction(state, tx, salt=None):
     #     if not set([tx.sender, tx.to]).issubset(tx.read_write_union_list):
     #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
     # else:
-    #     new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
+    #     if state.is_CONSTANTINOPLE():
+    #         new_address = utils.mk_metropolis_contract_address(tx.sender, salt, tx.data)
+    #     else:
+    #         new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
     #     if not set([tx.sender, tx.to, new_address]).issubset(tx.read_write_union_list):
     #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
 
