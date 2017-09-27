@@ -697,7 +697,7 @@ def vm_execute(ext, msg, code):
                     return vm_exception("WRITE ACCESS VIOLATION")
                 if ext.gathering_mode:
                     ext.record_write_list.add(new_address)
-                create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1)
+                create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1, salt=salt)
                 o, gas, data = ext.create(create_msg)
                 if o:
                     stk.append(utils.coerce_to_int(data))

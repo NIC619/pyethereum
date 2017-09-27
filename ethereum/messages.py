@@ -183,18 +183,23 @@ def apply_message(state, msg=None, **kwargs):
     ext = VMExt(state, transactions.Transaction(0, 0, 21000, b'', 0, b''))
     ext.gathering_mode = True
     # Add msg.sender, msg.to and new contract address to record r/w list
-    if msg.to != b'':
+    if msg.to not in [b'', b'\x00' * 20]:
         ext.record_read_list = set([msg.sender, msg.to])
         ext.record_write_list = set([msg.sender, msg.to])
+        result, gas_remained, data = apply_msg(ext, msg)
     else:
-        new_address = utils.mk_contract_address(msg.sender, state.get_nonce(msg.sender))
-        ext.record_read_list = set([msg.sender, msg.to, new_address])
-        ext.record_write_list = set([msg.sender, msg.to, new_address])
-    result, gas_remained, data = apply_msg(ext, msg)
+        if state.is_CONSTANTINOPLE():
+            msg.salt = state.get_nonce(msg.sender)
+            new_address = utils.mk_metropolis_contract_address(msg.sender, msg.salt, msg.data.extract_all())
+        else:
+            new_address = utils.mk_contract_address(msg.sender, state.get_nonce(msg.sender))
+        ext.record_read_list = set([msg.sender, new_address])
+        ext.record_write_list = set([msg.sender, new_address])
+        result, gas_remained, data = create_contract(ext, msg)
     return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list) if result else (None, [], [])
 
 
-def apply_transaction(state, tx, salt=None):
+def apply_transaction(state, tx):
     state.logs = []
     state.suicides = []
     state.refunds = 0
@@ -206,9 +211,9 @@ def apply_transaction(state, tx, salt=None):
         tx.write_list = set(tx.write_list) | set([tx.sender, tx.to])
     else:
         if state.is_CONSTANTINOPLE():
-            new_address = utils.mk_metropolis_contract_address(tx.sender, salt, tx.data)
+            new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
         else:
-            new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
+            new_address = utils.mk_contract_address(tx.sender, tx.nonce)
         tx.read_list = set(tx.read_list) | set([tx.sender, new_address])
         tx.write_list = set(tx.write_list) | set([tx.sender, new_address])
     # OPTION 2: throw excetion directly if these address not included in read/write list
@@ -217,10 +222,10 @@ def apply_transaction(state, tx, salt=None):
     #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
     # else:
     #     if state.is_CONSTANTINOPLE():
-    #         new_address = utils.mk_metropolis_contract_address(tx.sender, salt, tx.data)
+    #         new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
     #     else:
-    #         new_address = utils.mk_contract_address(tx.sender, state.get_nonce(tx.sender))
-    #     if not set([tx.sender, tx.to, new_address]).issubset(tx.read_write_union_list):
+    #         new_address = utils.mk_contract_address(tx.sender, tx.nonce)
+    #     if not set([tx.sender, new_address]).issubset(tx.read_write_union_list):
     #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
 
     intrinsic_gas = tx.intrinsic_gas_used
@@ -258,7 +263,7 @@ def apply_transaction(state, tx, salt=None):
         intrinsic_gas,
         message_data,
         code_address=tx.to,
-        salt=salt)
+        salt=tx.nonce)
 
     # MESSAGE
     ext = VMExt(state, tx)
