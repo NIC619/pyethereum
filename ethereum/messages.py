@@ -364,7 +364,7 @@ class VMExt():
         self.block_gas_limit = state.gas_limit
         self.log = lambda addr, topics, data: \
             state.add_log(Log(addr, topics, data))
-        self.create = lambda msg: create_contract(self, msg)
+        self.create = lambda msg, is_create_copy: create_contract(self, msg, is_create_copy)
         self.msg = lambda msg: _apply_msg(
             self, msg, self.get_code(msg.code_address))
         self.account_exists = state.account_exists
@@ -433,7 +433,7 @@ def _apply_msg(ext, msg, code):
     return res, gas, dat
 
 
-def create_contract(ext, msg):
+def create_contract(ext, msg, is_create_copy=False):
     log_msg.debug('CONTRACT CREATION')
 
     code = msg.data.extract_all()
@@ -469,7 +469,12 @@ def create_contract(ext, msg):
     snapshot = ext.snapshot()
 
     ext.set_nonce(msg.to, 1 if ext.post_spurious_dragon_hardfork() else 0)
-    res, gas, dat = _apply_msg(ext, msg, code)
+    if not is_create_copy:
+        res, gas, dat = _apply_msg(ext, msg, code)
+    else:
+        ext.set_code(msg.to, code)
+        log_msg.debug('SETTING CODE', addr=encode_hex(msg.to), lendat=len(code))
+        return 1, msg.gas, msg.to
 
     log_msg.debug(
         'CONTRACT CREATION FINISHED',

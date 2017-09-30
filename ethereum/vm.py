@@ -665,7 +665,7 @@ def vm_execute(ext, msg, code):
                 if ext.gathering_mode:
                     ext.record_write_list.add(new_address)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1)
-                o, gas, data = ext.create(create_msg)
+                o, gas, data = ext.create(create_msg, is_create_copy=False)
                 if o:
                     stk.append(utils.coerce_to_int(data))
                     compustate.last_returned = bytearray(b'')
@@ -698,7 +698,7 @@ def vm_execute(ext, msg, code):
                 if ext.gathering_mode:
                     ext.record_write_list.add(new_address)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1, salt=salt)
-                o, gas, data = ext.create(create_msg)
+                o, gas, data = ext.create(create_msg, is_create_copy=False)
                 if o:
                     stk.append(utils.coerce_to_int(data))
                     compustate.last_returned = bytearray(b'')
@@ -725,39 +725,25 @@ def vm_execute(ext, msg, code):
                     return vm_exception("WRITE ACCESS VIOLATION")
                 if ext.gathering_mode:
                     ext.record_write_list.add(new_address)
-                # Original CREATE style by making a message call
-                # ingas = compustate.gas
-                # if ext.post_anti_dos_hardfork():
-                #     ingas = all_but_1n(ingas, opcodes.CALL_CHILD_LIMIT_DENOM)
-                # # compensate for the per byte gas cost of contract creation beforehand
-                # ingas += len(target_code) * opcodes.GCONTRACTBYTE
-                # create_msg = Message(msg.to, b'', value, ingas, target_code, msg.depth + 1, salt=salt)
-                # o, gas, data = ext.create(create_msg)
-                # if o:
-                #     stk.append(utils.coerce_to_int(data))
-                #     compustate.last_returned = bytearray(b'')
-                # else:
-                #     stk.append(0)
-                #     compustate.last_returned = bytearray(data)
-                # compustate.gas = compustate.gas - ingas + gas
-
-                # Don't make a call but set the changes directly instead
-                # Checking if account is empty
-                if ext.post_constantinople_hardfork() and (
-                    ext.get_nonce(new_address) or len(ext.get_code(new_address))):
-                    stk.append(0)
+                ingas = compustate.gas
+                if ext.post_anti_dos_hardfork():
+                    ingas = all_but_1n(ingas, opcodes.CALL_CHILD_LIMIT_DENOM)
+                create_msg = Message(
+                    msg.to,
+                    b'',
+                    value,
+                    ingas,
+                    target_code,
+                    msg.depth + 1,
+                    salt=salt)
+                o, gas, data = ext.create(create_msg, is_create_copy=True)
+                if o:
+                    stk.append(utils.coerce_to_int(data))
                     compustate.last_returned = bytearray(b'')
-                b = ext.get_balance(msg.to)
-                if b > 0:
-                    ext.set_balance(msg.to, b)
-                    ext.set_nonce(msg.to, 0)
-                    ext.set_code(msg.to, b'')
-                # Update nonce
-                ext.set_nonce(new_address, 1 if ext.post_spurious_dragon_hardfork() else 0)
-                # Copying the code
-                ext.set_code(new_address, target_code)
-                stk.append(utils.coerce_to_int(new_address))
-                compustate.last_returned = bytearray(b'')
+                else:
+                    stk.append(0)
+                    compustate.last_returned = bytearray(data)
+                compustate.gas = compustate.gas - ingas + gas
             else:
                 stk.append(0)
                 compustate.last_returned = bytearray(b'')
