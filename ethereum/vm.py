@@ -148,6 +148,17 @@ def mem_extend(mem, compustate, op, start, sz):
         mem.extend(bytearray(m_extend))
     return True
 
+# Extends storage, and pays gas for it
+def stg_extend(stg, compustate, start, sz):
+    if sz and start + sz > len(stg):
+        expandsize = start + sz - len(stg)
+        gascost = expandsize * opcodes.GEXPANDBYTE
+        if compustate.gas < gascost:
+            compustate.gas = 0
+            return False
+        compustate.gas -= gascost
+        stg.extend(bytearray(expandsize))
+    return True
 
 # Pays gas for copying data
 def data_copy(compustate, size):
@@ -534,7 +545,19 @@ def vm_execute(ext, msg, code):
                     return vm_exception("READ ACCESS VIOLATION")
                 if ext.gathering_mode:
                     ext.record_read_list.add(msg.to)
-                stk.append(utils.big_endian_to_int(storage[s0*32 : s0*32+32 ]))
+                stk.append(utils.bytes_to_int(storage[s0*32 : s0*32+32 ]))
+                # storage_start = stk.pop()
+                # storage = ext.get_storage_data(msg.to)
+                # if ext.post_anti_dos_hardfork():
+                #     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
+                #         return vm_exception("OUT OF GAS")
+                # if not ext.gathering_mode and msg.to not in ext.read_list:
+                #     return vm_exception("READ ACCESS VIOLATION")
+                # if ext.gathering_mode:
+                #     ext.record_read_list.add(msg.to)
+                # # Append zero bytes if read beyond the boung
+                # padded_storage = utils.rzpad(storage[storage_start : storage_start+32], 32)
+                # stk.append(utils.bytes_to_int(padded_storage))
             elif op == 'SSTORE':
                 s0, s1 = stk.pop(), stk.pop()
                 if msg.static:
@@ -561,8 +584,13 @@ def vm_execute(ext, msg, code):
                     storage.extend(bytearray(expandsize))
                 storage[s0*32 : s0*32 + 32] = utils.encode_int32(s1)
                 ext.set_storage_data(msg.to, storage)
+                # storage_start, new_storage_data = stk.pop(), stk.pop()
+                # if not stg_extend(storage, compustate, storage_start, 32):
+                #     return vm_exception('OOG EXTENDING STORAGE')
+                # storage[storage_start : storage_start+32] = utils.encode_int32(new_storage_data)
+                # ext.set_storage_data(msg.to, storage)
             elif op == 'SCOPY':
-                mstart, msize, sstart = stk.pop(), stk.pop(), stk.pop()
+                mstart, msize, storage_start = stk.pop(), stk.pop(), stk.pop()
                 msize_rounded = utils.ceil32(msize)
                 if not mem_extend(mem, compustate, op, mstart, msize_rounded):
                     return vm_exception('OOG EXTENDING MEMORY')
@@ -582,7 +610,7 @@ def vm_execute(ext, msg, code):
                 gascost -= 3
                 storage = ext.get_storage_data(msg.to)
                 # EXPANSION COST
-                expandsize = (sstart) * 32 + msize_rounded - len(storage)
+                expandsize = (storage_start) * 32 + msize_rounded - len(storage)
                 if expandsize > 0:
                     gascost += expandsize * opcodes.GEXPANDBYTE
                     storage.extend(bytearray(expandsize))
@@ -590,8 +618,12 @@ def vm_execute(ext, msg, code):
                     return vm_exception('OUT OF GAS')
                 compustate.gas -= gascost
                 for i in range(msize_rounded // 32):
-                    storage[(sstart+i)*32 : (sstart+i)*32 + 32] = mem[mstart+i*32 : mstart+(i+1)*32]
+                    storage[(storage_start+i)*32 : (storage_start+i)*32 + 32] = mem[mstart+i*32 : mstart+(i+1)*32]
                 ext.set_storage_data(msg.to, storage)
+                # if not stg_extend(storage, compustate, storage_start, msize_rounded):
+                #     return vm_exception('OOG EXTENDING STORAGE')
+                # storage[storage_start : storage_start+msize_rounded] = mem[mstart : mstart+msize_rounded]
+                # ext.set_storage_data(msg.to, storage)
             elif op == 'JUMP':
                 compustate.pc = stk.pop()
                 if compustate.pc >= codelen or not (
