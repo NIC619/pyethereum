@@ -711,15 +711,15 @@ def vm_execute(ext, msg, code):
                 compustate.last_returned = bytearray(b'')
         # Create a new contract at determinable address using the code of existing contract
         elif op == 'CREATE_COPY':
-            value, salt, target_addr = stk.pop(), stk.pop(), utils.int_to_addr(stk.pop())
+            value, salt, mstart, msz = stk.pop(), stk.pop(), stk.pop(), stk.pop()
             if msg.static:
                 return vm_exception('Cannot CREATE_COPY inside a static context')
             if ext.get_balance(msg.to) >= value and msg.depth < MAX_DEPTH:
-                target_code = ext.get_code(target_addr)
+                cd = CallData(mem, mstart, msz)
                 new_address = utils.mk_metropolis_contract_address(
                     msg.to,
                     salt,
-                    target_code,
+                    mem[mstart : mstart+msz],
                 )
                 if not ext.gathering_mode and new_address not in ext.write_list:
                     return vm_exception("WRITE ACCESS VIOLATION")
@@ -728,14 +728,7 @@ def vm_execute(ext, msg, code):
                 ingas = compustate.gas
                 if ext.post_anti_dos_hardfork():
                     ingas = all_but_1n(ingas, opcodes.CALL_CHILD_LIMIT_DENOM)
-                create_msg = Message(
-                    msg.to,
-                    b'',
-                    value,
-                    ingas,
-                    target_code,
-                    msg.depth + 1,
-                    salt=salt)
+                create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1, salt=salt)
                 o, gas, data = ext.create(create_msg, is_create_copy=True)
                 if o:
                     stk.append(utils.coerce_to_int(data))

@@ -469,12 +469,7 @@ def create_contract(ext, msg, is_create_copy=False):
     snapshot = ext.snapshot()
 
     ext.set_nonce(msg.to, 1 if ext.post_spurious_dragon_hardfork() else 0)
-    if not is_create_copy:
-        res, gas, dat = _apply_msg(ext, msg, code)
-    else:
-        ext.set_code(msg.to, code)
-        log_msg.debug('SETTING CODE', addr=encode_hex(msg.to), lendat=len(code))
-        return 1, msg.gas, msg.to
+    res, gas, dat = _apply_msg(ext, msg, code)
 
     log_msg.debug(
         'CONTRACT CREATION FINISHED',
@@ -485,25 +480,42 @@ def create_contract(ext, msg, is_create_copy=False):
             len(dat)))
 
     if res:
-        if not len(dat):
+        if not len(dat) and not is_create_copy:
             # ext.set_code(msg.to, b'')
             return 1, gas, msg.to
-        gcost = len(dat) * opcodes.GCONTRACTBYTE
-        if gas >= gcost and (
-                len(dat) <= 24576 or not ext.post_spurious_dragon_hardfork()):
-            gas -= gcost
+        if not is_create_copy:
+            gcost = len(dat) * opcodes.GCONTRACTBYTE
+            if gas >= gcost and (
+                    len(dat) <= 24576 or not ext.post_spurious_dragon_hardfork()):
+                gas -= gcost
+            else:
+                dat = []
+                log_msg.debug(
+                    'CONTRACT CREATION FAILED',
+                    have=gas,
+                    want=gcost,
+                    block_number=ext.block_number)
+                if ext.post_homestead_hardfork():
+                    ext.revert(snapshot)
+                    return 0, 0, b''
+            
+            ext.set_code(msg.to, bytearray_to_bytestr(dat))
+            log_msg.debug('SETTING CODE', addr=encode_hex(msg.to), lendat=len(dat))
         else:
-            dat = []
-            log_msg.debug(
-                'CONTRACT CREATION FAILED',
-                have=gas,
-                want=gcost,
-                block_number=ext.block_number)
-            if ext.post_homestead_hardfork():
-                ext.revert(snapshot)
+            # Check if the data returned by processing the init_code is
+            # exactly 32 bytes
+            if len(dat) != 32:
+                log_msg.debug(
+                    'CONTRACT CREATION FAILED',
+                    have=gas,
+                    want=gcost,
+                    block_number=ext.block_number)
                 return 0, 0, b''
-        ext.set_code(msg.to, bytearray_to_bytestr(dat))
-        log_msg.debug('SETTING CODE', addr=encode_hex(msg.to), lendat=len(dat))
+            # If it's a CREATE_COPY call, avoid the per byte gas cost and
+            # copy the code from the address returned by processing the
+            # init_code
+            ext.set_code(msg.to, ext.get_code(utils.decode_addr(dat[12:])))
+            log_msg.debug('SETTING CODE', addr=encode_hex(msg.to), lendat=len(ext.get_code(msg.to)))
         return 1, gas, msg.to
     else:
         ext.revert(snapshot)
