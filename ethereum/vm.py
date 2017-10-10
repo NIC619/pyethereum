@@ -515,6 +515,14 @@ def vm_execute(ext, msg, code):
                 if not mem_extend(mem, compustate, op, s0, 1):
                     return vm_exception('OOG EXTENDING MEMORY')
                 mem[s0] = s1 % 256
+            elif op == 'MCOPY':
+                memfromstart, memfromsz, memtostart = \
+                    stk.pop(), stk.pop(), stk.pop()
+                if not mem_extend(mem, compustate, op, max(memfromstart, memtostart), memfromsz):
+                    return vm_exception('OOG EXTENDING MEMORY')
+                if not data_copy(compustate, memfromsz):
+                    return vm_exception('OOG COPY DATA')
+                mem[memtostart : memtostart+memfromsz] = mem[memfromstart : memfromstart+memfromsz]
             elif op == 'SLOAD':
                 if ext.post_anti_dos_hardfork():
                     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
@@ -696,6 +704,12 @@ def vm_execute(ext, msg, code):
                                        msg.depth + 1, code_address=to, static=msg.static)
                 else:
                     raise Exception("Lolwut")
+                # Temporary solution to replace call to Identity procompiled contrac
+                if call_msg.code_address == b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04':
+                    mem[memoutstart : memoutstart+memoutsz] = mem[meminstart : meminstart+meminsz]
+                    stk.append(1)
+                    compustate.gas += submsg_gas
+                    continue
                 # Get result
                 result, gas, data = ext.msg(call_msg)
                 if result == 0:
