@@ -261,7 +261,8 @@ def apply_transaction(state, tx):
         tx.startgas -
         intrinsic_gas,
         message_data,
-        code_address=tx.to)
+        code_address=tx.to,
+        salt=tx.nonce)
 
     # MESSAGE
     ext = VMExt(state, tx)
@@ -440,9 +441,8 @@ def create_contract(ext, msg):
     if ext.tx_origin != msg.sender:
         ext.increment_nonce(msg.sender)
 
-    if ext.post_constantinople_hardfork() and msg.sender == null_address:
-        msg.to = utils.mk_contract_address(msg.sender, 0)
-        # msg.to = sha3(msg.sender + code)[12:]
+    if ext.post_constantinople_hardfork():
+        msg.to = utils.mk_metropolis_contract_address(msg.sender, msg.salt, code)
     else:
         nonce = utils.encode_int(ext.get_nonce(msg.sender) - 1)
         msg.to = utils.mk_contract_address(msg.sender, nonce)
