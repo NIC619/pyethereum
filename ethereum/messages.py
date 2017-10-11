@@ -384,6 +384,7 @@ class VMExt():
         self.gathering_mode = False
         self.read_list = set(tx.read_list) if tx else set()
         self.write_list = set(tx.write_list) if tx else set()
+        self.storage_modified_list = set()  # list of accounts whose storage is modified
         self.record_read_list = set()       # list of accounts that data are read from
         self.record_write_list = set()      # list of accounts that data are written to
 
