@@ -61,6 +61,8 @@ opcodes = {
     0x5b: ['JUMPDEST', 0, 0, 1],
     # MCOPY: basic gas cost is 3+3(MLOAD+MSTORE), more is charged based on length of data to copy
     0x5c: ['MCOPY', 3, 0, 6],
+    # SCOPY: gas cost is charged the way SSTORE does
+    0x5d: ['SCOPY', 3, 0, 0],
     0xa0: ['LOG0', 2, 0, 375],
     0xa1: ['LOG1', 3, 0, 750],
     0xa2: ['LOG2', 4, 0, 1125],
