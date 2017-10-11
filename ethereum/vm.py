@@ -609,6 +609,63 @@ def vm_execute(ext, msg, code):
                 #     return vm_exception('OOG EXTENDING STORAGE')
                 # storage[s0 : s0 + 32] = utils.encode_int32(s1)
                 # ext.set_storage_data(msg.to, storage)
+            elif op == 'SCOPY':
+                # This is the legacy storage layout 
+                mstart, msize, storage_start = stk.pop(), stk.pop(), stk.pop()
+                msize_rounded = utils.ceil32(msize)
+                if not mem_extend(mem, compustate, op, mstart, msize_rounded):
+                    return vm_exception('OOG EXTENDING MEMORY')
+                if msg.static:
+                    return vm_exception(
+                        'Cannot SSTORE inside a static context')
+                if not ext.gathering_mode and msg.to not in ext.write_list:
+                    return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.gathering_mode:
+                    ext.record_write_list.add(msg.to)
+                # ACCESS COST
+                if msg.to in ext.storage_modified_list:
+                    gascost = 100
+                else:
+                    gascost = opcodes.GACCOUNTEDITCOST
+                    ext.storage_modified_list.add(msg.to)
+                gascost -= 3
+                storage = ext.get_storage_data(msg.to)
+                # EXPANSION COST
+                expandsize = (storage_start) * 32 + msize_rounded - len(storage)
+                if expandsize > 0:
+                    gascost += expandsize * opcodes.GEXPANDBYTE
+                    storage.extend(bytearray(expandsize))
+                if compustate.gas < gascost:
+                    return vm_exception('OUT OF GAS')
+                compustate.gas -= gascost
+                for i in range(msize_rounded // 32):
+                    storage[(storage_start+i)*32 : (storage_start+i)*32 + 32] = mem[mstart+i*32 : mstart+(i+1)*32]
+                ext.set_storage_data(msg.to, storage)
+                # This is the new storage layout 
+                # mstart, msize, storage_start = stk.pop(), stk.pop(), stk.pop()
+                # msize_rounded = utils.ceil32(msize)
+                # if not mem_extend(mem, compustate, op, mstart, msize_rounded):
+                #     return vm_exception('OOG EXTENDING MEMORY')
+                # if msg.static:
+                #     return vm_exception(
+                #         'Cannot SSTORE inside a static context')
+                # if not ext.gathering_mode and msg.to not in ext.write_list:
+                #     return vm_exception("WRITE ACCESS VIOLATION")
+                # if ext.gathering_mode:
+                #     ext.record_write_list.add(msg.to)
+                # ACCESS COST
+                # if msg.to in ext.storage_modified_list:
+                #     gascost = 100
+                # else:
+                #     gascost = opcodes.GACCOUNTEDITCOST
+                #     ext.storage_modified_list.add(msg.to)
+                # gascost -= 3
+                # storage = ext.get_storage_data(msg.to)
+                # EXPANSION COST
+                # if not stg_extend(storage, compustate, storage_start, msize_rounded):
+                #     return vm_exception('OOG EXTENDING STORAGE')
+                # storage[storage_start : storage_start+msize_rounded] = mem[mstart : mstart+msize_rounded]
+                # ext.set_storage_data(msg.to, storage)
             elif op == 'JUMP':
                 compustate.pc = stk.pop()
                 if compustate.pc >= codelen or not (
@@ -839,8 +896,8 @@ class VmExtBase():
         self.get_code = lambda addr: b''
         self.get_balance = lambda addr: 0
         self.set_balance = lambda addr, balance: 0
-        self.set_storage_data = lambda addr, value: 0
-        self.get_storage_data = lambda addr: 0
+        self.set_storage_data = lambda addr, key, value: 0
+        self.get_storage_data = lambda addr, key: 0
         self.log_storage = lambda addr: 0
         self.add_suicide = lambda addr: 0
         self.add_refund = lambda x: 0
