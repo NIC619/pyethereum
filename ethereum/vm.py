@@ -736,7 +736,7 @@ def vm_execute(ext, msg, code):
                 if ext.post_anti_dos_hardfork():
                     ingas = all_but_1n(ingas, opcodes.CALL_CHILD_LIMIT_DENOM)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1)
-                o, gas, data = ext.create(create_msg)
+                o, gas, data = ext.create(create_msg, is_create_copy=False)
                 if o:
                     stk.append(utils.coerce_to_int(data))
                     compustate.last_returned = bytearray(b'')
@@ -770,6 +770,37 @@ def vm_execute(ext, msg, code):
                     ext.record_write_list.add(new_address)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1, salt=salt)
                 o, gas, data = ext.create(create_msg, is_create_copy=False)
+                if o:
+                    stk.append(utils.coerce_to_int(data))
+                    compustate.last_returned = bytearray(b'')
+                else:
+                    stk.append(0)
+                    compustate.last_returned = bytearray(data)
+                compustate.gas = compustate.gas - ingas + gas
+            else:
+                stk.append(0)
+                compustate.last_returned = bytearray(b'')
+        # Create a new contract at determinable address using the code of existing contract
+        elif op == 'CREATE_COPY':
+            value, salt, mstart, msz = stk.pop(), stk.pop(), stk.pop(), stk.pop()
+            if msg.static:
+                return vm_exception('Cannot CREATE_COPY inside a static context')
+            if ext.get_balance(msg.to) >= value and msg.depth < MAX_DEPTH:
+                cd = CallData(mem, mstart, msz)
+                new_address = utils.mk_metropolis_contract_address(
+                    msg.to,
+                    salt,
+                    mem[mstart : mstart+msz],
+                )
+                if not ext.gathering_mode and new_address not in ext.write_list:
+                    return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.gathering_mode:
+                    ext.record_write_list.add(new_address)
+                ingas = compustate.gas
+                if ext.post_anti_dos_hardfork():
+                    ingas = all_but_1n(ingas, opcodes.CALL_CHILD_LIMIT_DENOM)
+                create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1, salt=salt)
+                o, gas, data = ext.create(create_msg, is_create_copy=True)
                 if o:
                     stk.append(utils.coerce_to_int(data))
                     compustate.last_returned = bytearray(b'')
