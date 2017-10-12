@@ -183,7 +183,7 @@ def verify_execution_results(state, block):
 def mk_receipt_sha(receipts):
     t = trie.Trie(EphemDB())
     for i, receipt in enumerate(receipts):
-        t.update(rlp.encode(i), rlp.encode(receipt))
+        t.update(sha3(rlp.encode(i)), rlp.encode(receipt))
     return t.root_hash
 
 

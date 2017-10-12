@@ -74,8 +74,9 @@ class Account(rlp.Serializable):
         for k, v in self.storage_cache.items():
             if v:
                 self.storage_trie.update(utils.encode_int32(k), rlp.encode(v))
-            else:
-                self.storage_trie.delete(utils.encode_int32(k))
+            # Trie don't support delete for the moment
+            # else:
+            #     self.storage_trie.delete(utils.encode_int32(k))
         self.storage_cache = {}
         self.storage = self.storage_trie.root_hash
 
@@ -163,7 +164,7 @@ class State():
         if address in self.cache:
             return self.cache[address]
         rlpdata = self.trie.get(address)
-        if rlpdata != trie.BLANK_NODE:
+        if rlpdata not in (b'', None):
             o = rlp.decode(rlpdata, Account, env=self.env)
         else:
             o = Account.blank_account(
@@ -340,9 +341,10 @@ class State():
                         not self.is_SPURIOUS_DRAGON() and not acct.deleted):
                     # print('upd', encode_hex(addr))
                     self.trie.update(addr, rlp.encode(acct))
-                else:
+                # else:
                     # print('del', encode_hex(addr))
-                    self.trie.delete(addr)
+                    # Trie don't support delete for the moment
+                    # self.trie.delete(addr)
         self.cache = {}
         self.journal = []
 
