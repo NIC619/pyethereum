@@ -1,963 +1,355 @@
-#!/usr/bin/env python
-import os
-import rlp
-from ethereum import utils
-from ethereum.utils import to_string
-from ethereum.abi import is_string
-import copy
-from rlp.utils import decode_hex, ascii_chr, str_to_bytes
-from ethereum.utils import encode_hex
-from ethereum.fast_rlp import encode_optimized
-rlp_encode = encode_optimized
+from ethereum.utils import sha3, encode_hex
+from ethereum.utils import safe_ord as ord
 
-bin_to_nibbles_cache = {}
+# Binary utilities
+# 0100000101010111010000110100100101001001 -> ASCII
+def decode_bin(x):
+    o = bytearray(len(x) // 8)
+    for i in range(0, len(x), 8):
+        v = 0
+        for c in x[i:i+8]:
+            v = v * 2 + c
+        o[i//8] = v
+    return bytes(o)
 
-hti = {}
-for i, c in enumerate(b'0123456789abcdef'):
-    hti[c] = i
-for i, c in enumerate('0123456789abcdef'):
-    hti[c] = i
-
-
-def bin_to_nibbles(s):
-    """convert string s to nibbles (half-bytes)
-
-    >>> bin_to_nibbles("")
-    []
-    >>> bin_to_nibbles("h")
-    [6, 8]
-    >>> bin_to_nibbles("he")
-    [6, 8, 6, 5]
-    >>> bin_to_nibbles("hello")
-    [6, 8, 6, 5, 6, 12, 6, 12, 6, 15]
-    """
-    return [hti[c] for c in encode_hex(s)]
-
-
-def nibbles_to_bin(nibbles):
-    if any(x > 15 or x < 0 for x in nibbles):
-        raise Exception("nibbles can only be [0,..15]")
-
-    if len(nibbles) % 2:
-        raise Exception("nibbles must be of even numbers")
-
-    res = b''
-    for i in range(0, len(nibbles), 2):
-        res += ascii_chr(16 * nibbles[i] + nibbles[i + 1])
-    return res
-
-
-NIBBLE_TERMINATOR = 16
-
-
-def with_terminator(nibbles):
-    nibbles = nibbles[:]
-    if not nibbles or nibbles[-1] != NIBBLE_TERMINATOR:
-        nibbles.append(NIBBLE_TERMINATOR)
-    return nibbles
-
-
-def without_terminator(nibbles):
-    nibbles = nibbles[:]
-    if nibbles and nibbles[-1] == NIBBLE_TERMINATOR:
-        del nibbles[-1]
-    return nibbles
-
-
-def adapt_terminator(nibbles, has_terminator):
-    if has_terminator:
-        return with_terminator(nibbles)
-    else:
-        return without_terminator(nibbles)
-
-
-def pack_nibbles(nibbles):
-    """pack nibbles to binary
-
-    :param nibbles: a nibbles sequence. may have a terminator
-    """
-
-    if nibbles[-1:] == [NIBBLE_TERMINATOR]:
-        flags = 2
-        nibbles = nibbles[:-1]
-    else:
-        flags = 0
-
-    oddlen = len(nibbles) % 2
-    flags |= oddlen   # set lowest bit if odd number of nibbles
-    if oddlen:
-        nibbles = [flags] + nibbles
-    else:
-        nibbles = [flags, 0] + nibbles
+# ASCII -> 0100000101010111010000110100100101001001
+def encode_bin(x):
     o = b''
-    for i in range(0, len(nibbles), 2):
-        o += ascii_chr(16 * nibbles[i] + nibbles[i + 1])
+    for c in x:
+        c = ord(c)
+        p = bytearray(8)
+        for i in range(8):
+            p[7-i] = c % 2
+            c //= 2
+        o += p
     return o
 
+two_bits = [bytes([0,0]), bytes([0,1]),
+            bytes([1,0]), bytes([1,1])]
+prefix00 = bytes([0,0])
+prefix100000 = bytes([1,0,0,0,0,0])
 
-def unpack_to_nibbles(bindata):
-    """unpack packed binary data to nibbles
-
-    :param bindata: binary packed from nibbles
-    :return: nibbles sequence, may have a terminator
-    """
-    o = bin_to_nibbles(bindata)
-    flags = o[0]
-    if flags & 2:
-        o.append(NIBBLE_TERMINATOR)
-    if flags & 1 == 1:
-        o = o[1:]
+# Encodes a sequence of 0s and 1s into tightly packed bytes
+def encode_bin_path(b):
+    b2 = bytes((4 - len(b)) % 4) + b
+    prefix = two_bits[len(b) % 4]
+    if len(b2) % 8 == 4:
+        return decode_bin(prefix00 + prefix + b2)
     else:
-        o = o[2:]
+        return decode_bin(prefix100000 + prefix + b2)
+
+# Decodes bytes into a sequence of 0s and 1s
+def decode_bin_path(p):
+    p = encode_bin(p)
+    if p[0] == 1:
+        p = p[4:]
+    assert p[0:2] == prefix00
+    L = two_bits.index(p[2:4])
+    return p[4+((4 - L) % 4):]
+
+def common_prefix_length(a, b):
+    o = 0
+    while o < len(a) and o < len(b) and a[o] == b[o]:
+        o += 1
     return o
 
 
-def starts_with(full, part):
-    """ test whether the items in the part is
-    the leading items of the full
-    """
-    if len(full) < len(part):
-        return False
-    return full[:len(part)] == part
+class EphemDB():
+    def __init__(self):
+        self.kv = {}
+
+    def get(self, k):
+        return self.kv.get(k, None)
+
+    def put(self, k, v):
+        self.kv[k] = v
+
+    def delete(self, k):
+        del self.kv[k]
+
+KV_TYPE = 0
+BRANCH_TYPE = 1
+LEAF_TYPE = 2
+
+b1 = bytes([1])
+b0 = bytes([0])
+
+# Input: a serialized node
+def parse_node(node):
+    if node[0] == BRANCH_TYPE:
+        # Output: left child, right child, node type
+        return node[1:33], node[33:], BRANCH_TYPE
+    elif node[0] == KV_TYPE:
+        # Output: keypath: child, node type
+        return decode_bin_path(node[1:-32]), node[-32:], KV_TYPE
+    elif node[0] == LEAF_TYPE:
+        # Output: None, value, node type
+        return None, node[1:], LEAF_TYPE
+    else:
+        raise Exception("Bad node")
+
+# Serializes a key/value node
+def encode_kv_node(keypath, node):
+    assert keypath
+    assert len(node) == 32
+    o = bytes([KV_TYPE]) + encode_bin_path(keypath) + node
+    return o
+
+# Serializes a branch node (ie. a node with 2 children)
+def encode_branch_node(left, right):
+    assert len(left) == len(right) == 32
+    return bytes([BRANCH_TYPE]) + left + right
+
+# Serializes a leaf node
+def encode_leaf_node(value):
+    return bytes([LEAF_TYPE]) + value
+
+# Saves a value into the database and returns its hash
+def hash_and_save(db, node):
+    h = sha3(node)
+    db.put(h, node)
+    return h
+
+# Fetches the value with a given keypath from the given node
+def _get(db, node, keypath):
+    # Empty trie
+    if not node:
+        return None
+    L, R, nodetype = parse_node(db.get(node))
+    # Key-value node descend
+    if nodetype == LEAF_TYPE:
+        return R
+    elif nodetype == KV_TYPE:
+        if keypath[:len(L)] == L:
+            return _get(db, R, keypath[len(L):])
+        else:
+            return None
+    # Branch node descend
+    elif nodetype == BRANCH_TYPE:
+        if keypath[:1] == b0:
+            return _get(db, L, keypath[1:])
+        else:
+            return _get(db, R, keypath[1:])
+
+# Updates the value at the given keypath from the given node
+def _update(db, node, keypath, val):
+    # Empty trie
+    if not node:
+        if val:
+            return hash_and_save(db, encode_kv_node(keypath, hash_and_save(db, encode_leaf_node(val))))
+        else:
+            return b''
+    L, R, nodetype = parse_node(db.get(node))
+    # Node is a leaf node
+    if nodetype == LEAF_TYPE:
+        return hash_and_save(db, encode_leaf_node(val)) if val else b''
+    # node is a key-value node
+    elif nodetype == KV_TYPE:
+        # Keypath prefixes match
+        if keypath[:len(L)] == L:
+            # Recurse into child
+            o = _update(db, R, keypath[len(L):], val)
+            # If child is empty
+            if not o:
+                return b''
+            #print(db.get(o))
+            subL, subR, subnodetype = parse_node(db.get(o))
+            # If the child is a key-value node, compress together the keypaths
+            # into one node
+            if subnodetype == KV_TYPE:
+                return hash_and_save(db, encode_kv_node(L + subL, subR))
+            else:
+                return hash_and_save(db, encode_kv_node(L, o)) if o else b''
+        # Keypath prefixes don't match. Here we will be converting a key-value node
+        # of the form (k, CHILD) into a structure of one of the following forms:
+        # i.   (k[:-1], (NEWCHILD, CHILD))
+        # ii.  (k[:-1], ((k2, NEWCHILD), CHILD))
+        # iii. (k1, ((k2, CHILD), NEWCHILD))
+        # iv.  (k1, ((k2, CHILD), (k2', NEWCHILD))
+        # v.   (CHILD, NEWCHILD)
+        # vi.  ((k[1:], CHILD), (k', NEWCHILD))
+        # vii. ((k[1:], CHILD), NEWCHILD)
+        # viii (CHILD, (k[1:], NEWCHILD))
+        else:
+            cf = common_prefix_length(L, keypath[:len(L)])
+            # valnode: the child node that has the new value we are adding
+            # Case 1: keypath prefixes almost match, so we are in case (i), (ii), (v), (vi)
+            if len(keypath) == cf + 1:
+                valnode = val
+            # Case 2: keypath prefixes mismatch in the middle, so we need to break
+            # the keypath in half. We are in case (iii), (iv), (vii), (viii)
+            else:
+                valnode = hash_and_save(db, encode_kv_node(keypath[cf+1:], hash_and_save(db, encode_leaf_node(val))))
+            # oldnode: the child node the has the old child value
+            # Case 1: (i), (iii), (v), (vi)
+            if len(L) == cf + 1:
+                oldnode = R
+            # (ii), (iv), (vi), (viii)
+            else:
+                oldnode = hash_and_save(db, encode_kv_node(L[cf+1:], R))
+            # Create the new branch node (because the key paths diverge, there has to
+            # be some "first bit" at which they diverge, so there must be a branch
+            # node somewhere)
+            if keypath[cf:cf+1] == b1:
+                newsub = hash_and_save(db, encode_branch_node(oldnode, valnode))
+            else:
+                newsub = hash_and_save(db, encode_branch_node(valnode, oldnode))
+            # Case 1: keypath prefixes match in the first bit, so we still need
+            # a kv node at the top
+            # (i) (ii) (iii) (iv)
+            if cf:
+                return hash_and_save(db, encode_kv_node(L[:cf], newsub))
+            # Case 2: keypath prefixes diverge in the first bit, so we replace the
+            # kv node with a branch node
+            # (v) (vi) (vii) (viii)
+            else:
+                return newsub
+    # node is a branch node
+    elif nodetype == BRANCH_TYPE:
+        newL, newR = L, R
+        # Which child node to update? Depends on first bit in keypath
+        if keypath[:1] == b0:
+            newL = _update(db, L, keypath[1:], val)
+        else:
+            newR = _update(db, R, keypath[1:], val)
+        # Compress branch node into kv node
+        if not newL or not newR:
+            subL, subR, subnodetype = parse_node(db.get(newL or newR))
+            first_bit = b1 if newR else b0
+            # Compress (k1, (k2, NODE)) -> (k1 + k2, NODE)
+            if subnodetype == KV_TYPE:
+                return hash_and_save(db, encode_kv_node(first_bit + subL, subR))
+            # kv node pointing to a branch node
+            elif subnodetype == BRANCH_TYPE:
+                return hash_and_save(db, encode_kv_node(first_bit, newL or newR))
+        else:
+            return hash_and_save(db, encode_branch_node(newL, newR))
+    raise Exception("How did I get here?")
+
+# Prints a tree, and checks that all invariants check out
+def print_and_check_invariants(db, node, prefix=b''):
+    if node == b'' and prefix == b'':
+        return {}
+    L, R, nodetype = parse_node(db.get(node))
+    if nodetype == LEAF_TYPE:
+        # All keys must be 256 bits
+        assert len(prefix) == 256
+        return {prefix: R}
+    elif nodetype == KV_TYPE:
+        # (k1, (k2, node)) two nested key values nodes not allowed
+        assert 0 < len(L) <= 256 - len(prefix)
+        if len(L) + len(prefix) < 256:
+            subL, subR, subnodetype = parse_node(db.get(R))
+            assert subnodetype != KV_TYPE
+            # Childre of a key node cannot be empty
+            assert subR != sha3(b'')
+        return print_and_check_invariants(db, R, prefix + L)
+    else:
+        # Children of a branch node cannot be empty
+        assert L != sha3(b'') and R != sha3(b'')
+        o = {}
+        o.update(print_and_check_invariants(db, L, prefix + b0))
+        o.update(print_and_check_invariants(db, R, prefix + b1))
+        return o
+
+# Pretty-print all nodes in a tree (for debugging purposes)
+def print_nodes(db, node, prefix=b''):
+    if node == b'':
+        print('empty node')
+        return
+    L, R, nodetype = parse_node(db.get(node))
+    if nodetype == LEAF_TYPE:
+        print('value node', encode_hex(node[:4]), R)
+    elif nodetype == KV_TYPE:
+        print(('kv node:', encode_hex(node[:4]), ''.join(['1' if x == 1 else '0' for x in L]), encode_hex(R[:4])))
+        print_nodes(db, R, prefix + L)
+    else:
+        print(('branch node:', encode_hex(node[:4]), encode_hex(L[:4]), encode_hex(R[:4])))
+        print_nodes(db, L, prefix + b0)
+        print_nodes(db, R, prefix + b1)
+
+# Get a Merkle proof
+def _get_branch(db, node, keypath):
+    if not keypath:
+        return [db.get(node)]
+    L, R, nodetype = parse_node(db.get(node))
+    if nodetype == KV_TYPE:
+        path = encode_bin_path(L)
+        if keypath[:len(L)] == L:
+            return [b'\x01'+path] + _get_branch(db, R, keypath[len(L):])
+        else:
+            return [b'\x01'+path, db.get(R)]
+    elif nodetype == BRANCH_TYPE:
+        if keypath[:1] == b0:
+            return [b'\x02'+R] + _get_branch(db, L, keypath[1:])
+        else:
+            return [b'\x03'+L] + _get_branch(db, R, keypath[1:])
+
+# Verify a Merkle proof
+def _verify_branch(branch, root, value):
+    nodes = [branch[-1]]
+    _keypath = b''
+    for data in branch[-2::-1]:
+        marker, node = data[0], data[1:]
+        # it's a keypath
+        if marker == 1:
+            node = decode_bin_path(node)
+            _keypath = node + _keypath
+            nodes.insert(0, encode_kv_node(node, sha3(nodes[0])))
+        # it's a right-side branch
+        elif marker == 2:
+            _keypath = b0 + _keypath
+            nodes.insert(0, encode_branch_node(sha3(nodes[0]), node))
+        # it's a left-side branch
+        elif marker == 3:
+            _keypath = b1 + _keypath
+            nodes.insert(0, encode_branch_node(node, sha3(nodes[0])))
+        else:
+            raise Exception("Foo")
+    assert sha3(nodes[0]) == root
+    db = EphemDB()
+    db.kv = {sha3(node): node for node in nodes}
+    assert _get(db, root, _keypath) == value
+    return True
 
 
-(
-    NODE_TYPE_BLANK,
-    NODE_TYPE_LEAF,
-    NODE_TYPE_EXTENSION,
-    NODE_TYPE_BRANCH
-) = tuple(range(4))
-
-
-def is_key_value_type(node_type):
-    return node_type in [NODE_TYPE_LEAF,
-                         NODE_TYPE_EXTENSION]
-
-
-BLANK_NODE = b''
-BLANK_ROOT = utils.sha3rlp(b'')
-
-
-class Trie(object):
-
-    def __init__(self, db, root_hash=BLANK_ROOT):
-        """it also present a dictionary like interface
-
-        :param db key value database
-        :root: blank or trie node in form of [key, value] or [v0,v1..v15,v]
-        """
-        self.db = db  # Pass in a database object directly
-        self.set_root_hash(root_hash)
-        self.deletes = []
-
-    # def __init__(self, dbfile, root_hash=BLANK_ROOT):
-    #     """it also present a dictionary like interface
-
-    #     :param dbfile: key value database
-    #     :root: blank or trie node in form of [key, value] or [v0,v1..v15,v]
-    #     """
-    #     if isinstance(dbfile, str):
-    #         dbfile = os.path.abspath(dbfile)
-    #         self.db = DB(dbfile)
-    #     else:
-    # self.db = dbfile  # Pass in a database object directly
-    #     self.set_root_hash(root_hash)
+BLANK_ROOT = b''
+# Trie wrapper class
+class Trie():
+    def __init__(self, db, root=BLANK_ROOT):
+        self.db = db
+        self.root = root
+        assert isinstance(self.root, bytes)
 
     @property
     def root_hash(self):
-        """always empty or a 32 bytes string
-        """
-        return self._root_hash
-
-    def get_root_hash(self):
-        return self._root_hash
-
-    def _update_root_hash(self):
-        val = rlp_encode(self.root_node)
-        key = utils.sha3(val)
-        self.db.put(key, str_to_bytes(val))
-        self._root_hash = key
+        return self.root
 
     @root_hash.setter
     def root_hash(self, value):
-        self.set_root_hash(value)
-
-    def set_root_hash(self, root_hash):
-        assert is_string(root_hash)
-        assert len(root_hash) in [0, 32]
-        if root_hash == BLANK_ROOT:
-            self.root_node = BLANK_NODE
-            self._root_hash = BLANK_ROOT
-            return
-        self.root_node = self._decode_to_node(root_hash)
-        self._root_hash = root_hash
-
-    def clear(self):
-        """ clear all tree data
-        """
-        self._delete_child_storage(self.root_node)
-        self._delete_node_storage(self.root_node)
-        self.root_node = BLANK_NODE
-        self._root_hash = BLANK_ROOT
-
-    def _delete_child_storage(self, node):
-        node_type = self._get_node_type(node)
-        if node_type == NODE_TYPE_BRANCH:
-            for item in node[:16]:
-                self._delete_child_storage(self._decode_to_node(item))
-        elif node_type == NODE_TYPE_EXTENSION:
-            self._delete_child_storage(self._decode_to_node(node[1]))
-
-    def _encode_node(self, node, put_in_db=True):
-        if node == BLANK_NODE:
-            return BLANK_NODE
-        # assert isinstance(node, list)
-        rlpnode = rlp_encode(node)
-        if len(rlpnode) < 32:
-            return node
-
-        hashkey = utils.sha3(rlpnode)
-        if put_in_db:
-            self.db.put(hashkey, str_to_bytes(rlpnode))
-        return hashkey
-
-    def _decode_to_node(self, encoded):
-        if encoded == BLANK_NODE:
-            return BLANK_NODE
-        if isinstance(encoded, list):
-            return encoded
-        o = rlp.decode(self.db.get(encoded))
-        return o
-
-    def _get_node_type(self, node):
-        """ get node type and content
-
-        :param node: node in form of list, or BLANK_NODE
-        :return: node type
-        """
-        if node == BLANK_NODE:
-            return NODE_TYPE_BLANK
-
-        if len(node) == 2:
-            nibbles = unpack_to_nibbles(node[0])
-            has_terminator = (nibbles and nibbles[-1] == NIBBLE_TERMINATOR)
-            return NODE_TYPE_LEAF if has_terminator\
-                else NODE_TYPE_EXTENSION
-        if len(node) == 17:
-            return NODE_TYPE_BRANCH
-
-    def _get(self, node, key):
-        """ get value inside a node
-
-        :param node: node in form of list, or BLANK_NODE
-        :param key: nibble list without terminator
-        :return:
-            BLANK_NODE if does not exist, otherwise value or hash
-        """
-        node_type = self._get_node_type(node)
-
-        if node_type == NODE_TYPE_BLANK:
-            return BLANK_NODE
-
-        if node_type == NODE_TYPE_BRANCH:
-            # already reach the expected node
-            if not key:
-                return node[-1]
-            sub_node = self._decode_to_node(node[key[0]])
-            return self._get(sub_node, key[1:])
-
-        # key value node
-        curr_key = without_terminator(unpack_to_nibbles(node[0]))
-        if node_type == NODE_TYPE_LEAF:
-            return node[1] if key == curr_key else BLANK_NODE
-
-        if node_type == NODE_TYPE_EXTENSION:
-            # traverse child nodes
-            if starts_with(key, curr_key):
-                sub_node = self._decode_to_node(node[1])
-                return self._get(sub_node, key[len(curr_key):])
-            else:
-                return BLANK_NODE
-
-    def _update(self, node, key, value):
-        """ update item inside a node
-
-        :param node: node in form of list, or BLANK_NODE
-        :param key: nibble list without terminator
-            .. note:: key may be []
-        :param value: value string
-        :return: new node
-
-        if this node is changed to a new node, it's parent will take the
-        responsibility to *store* the new node storage, and delete the old
-        node storage
-        """
-        node_type = self._get_node_type(node)
-
-        if node_type == NODE_TYPE_BLANK:
-            return [pack_nibbles(with_terminator(key)), value]
-
-        elif node_type == NODE_TYPE_BRANCH:
-            if not key:
-                node[-1] = value
-            else:
-                new_node = self._update_and_delete_storage(
-                    self._decode_to_node(node[key[0]]),
-                    key[1:], value)
-                node[key[0]] = self._encode_node(new_node)
-            return node
-
-        elif is_key_value_type(node_type):
-            return self._update_kv_node(node, key, value)
-
-    def _update_and_delete_storage(self, node, key, value):
-        old_node = node[:]
-        new_node = self._update(node, key, value)
-        if old_node != new_node:
-            self._delete_node_storage(old_node)
-        return new_node
-
-    def _update_kv_node(self, node, key, value):
-        node_type = self._get_node_type(node)
-        curr_key = without_terminator(unpack_to_nibbles(node[0]))
-        is_inner = node_type == NODE_TYPE_EXTENSION
-
-        # find longest common prefix
-        prefix_length = 0
-        for i in range(min(len(curr_key), len(key))):
-            if key[i] != curr_key[i]:
-                break
-            prefix_length = i + 1
-
-        remain_key = key[prefix_length:]
-        remain_curr_key = curr_key[prefix_length:]
-
-        if remain_key == [] == remain_curr_key:
-            if not is_inner:
-                return [node[0], value]
-            new_node = self._update_and_delete_storage(
-                self._decode_to_node(node[1]), remain_key, value)
-
-        elif remain_curr_key == []:
-            if is_inner:
-                new_node = self._update_and_delete_storage(
-                    self._decode_to_node(node[1]), remain_key, value)
-            else:
-                new_node = [BLANK_NODE] * 17
-                new_node[-1] = node[1]
-                new_node[remain_key[0]] = self._encode_node([
-                    pack_nibbles(with_terminator(remain_key[1:])),
-                    value
-                ])
-        else:
-            new_node = [BLANK_NODE] * 17
-            if len(remain_curr_key) == 1 and is_inner:
-                new_node[remain_curr_key[0]] = node[1]
-            else:
-                new_node[remain_curr_key[0]] = self._encode_node([
-                    pack_nibbles(
-                        adapt_terminator(remain_curr_key[1:], not is_inner)
-                    ),
-                    node[1]
-                ])
-
-            if remain_key == []:
-                new_node[-1] = value
-            else:
-                new_node[remain_key[0]] = self._encode_node([
-                    pack_nibbles(with_terminator(remain_key[1:])), value
-                ])
-
-        if prefix_length:
-            # create node for key prefix
-            return [pack_nibbles(curr_key[:prefix_length]),
-                    self._encode_node(new_node)]
-        else:
-            return new_node
-
-    def _getany(self, node, reverse=False, path=[]):
-        # print('getany', node, 'reverse=', reverse, path)
-        node_type = self._get_node_type(node)
-        if node_type == NODE_TYPE_BLANK:
-            return None
-        if node_type == NODE_TYPE_BRANCH:
-            if node[16] and not reverse:
-                # print('found!', [16], path)
-                return [16]
-            scan_range = list(range(16))
-            if reverse:
-                scan_range.reverse()
-            for i in scan_range:
-                o = self._getany(
-                    self._decode_to_node(
-                        node[i]),
-                    reverse=reverse,
-                    path=path + [i])
-                if o is not None:
-                    # print('found@', [i] + o, path)
-                    return [i] + o
-            if node[16] and reverse:
-                # print('found!', [16], path)
-                return [16]
-            return None
-        curr_key = without_terminator(unpack_to_nibbles(node[0]))
-        if node_type == NODE_TYPE_LEAF:
-            # print('found#', curr_key, path)
-            return curr_key
-
-        if node_type == NODE_TYPE_EXTENSION:
-            curr_key = without_terminator(unpack_to_nibbles(node[0]))
-            sub_node = self._decode_to_node(node[1])
-            return curr_key + \
-                self._getany(sub_node, reverse=reverse, path=path + curr_key)
-
-    def _split(self, node, key):
-        node_type = self._get_node_type(node)
-        if node_type == NODE_TYPE_BLANK:
-            return BLANK_NODE, BLANK_NODE
-        elif not key:
-            return BLANK_NODE, node
-        elif node_type == NODE_TYPE_BRANCH:
-            b1 = node[:key[0]]
-            b1 += [''] * (17 - len(b1))
-            b2 = node[key[0] + 1:]
-            b2 = [''] * (17 - len(b2)) + b2
-            b1[16], b2[16] = b2[16], b1[16]
-            sub = self._decode_to_node(node[key[0]])
-            sub1, sub2 = self._split(sub, key[1:])
-            b1[key[0]] = self._encode_node(sub1) if sub1 else ''
-            b2[key[0]] = self._encode_node(sub2) if sub2 else ''
-            return self._normalize_branch_node(b1) if len([x for x in b1 if x]) else BLANK_NODE, \
-                self._normalize_branch_node(b2) if len(
-                    [x for x in b2 if x]) else BLANK_NODE
-
-        descend_key = without_terminator(unpack_to_nibbles(node[0]))
-        if node_type == NODE_TYPE_LEAF:
-            if descend_key < key:
-                return node, BLANK_NODE
-            else:
-                return BLANK_NODE, node
-        elif node_type == NODE_TYPE_EXTENSION:
-            sub_node = self._decode_to_node(node[1])
-            sub_key = key[len(descend_key):]
-            if starts_with(key, descend_key):
-                sub1, sub2 = self._split(sub_node, sub_key)
-                subtype1 = self._get_node_type(sub1)
-                subtype2 = self._get_node_type(sub2)
-                if not sub1:
-                    o1 = BLANK_NODE
-                elif subtype1 in (NODE_TYPE_LEAF, NODE_TYPE_EXTENSION):
-                    new_key = key[:len(descend_key)] + \
-                        unpack_to_nibbles(sub1[0])
-                    o1 = [pack_nibbles(new_key), sub1[1]]
-                else:
-                    o1 = [pack_nibbles(key[:len(descend_key)]),
-                          self._encode_node(sub1)]
-                if not sub2:
-                    o2 = BLANK_NODE
-                elif subtype2 in (NODE_TYPE_LEAF, NODE_TYPE_EXTENSION):
-                    new_key = key[:len(descend_key)] + \
-                        unpack_to_nibbles(sub2[0])
-                    o2 = [pack_nibbles(new_key), sub2[1]]
-                else:
-                    o2 = [pack_nibbles(key[:len(descend_key)]),
-                          self._encode_node(sub2)]
-                return o1, o2
-            elif descend_key < key[:len(descend_key)]:
-                return node, BLANK_NODE
-            elif descend_key > key[:len(descend_key)]:
-                return BLANK_NODE, node
-            else:
-                return BLANK_NODE, BLANK_NODE
-
-    def split(self, key):
-        key = bin_to_nibbles(key)
-        r1, r2 = self._split(self.root_node, key)
-        t1, t2 = Trie(self.db), Trie(self.db)
-        t1.root_node, t2.root_node = r1, r2
-        return t1, t2
-
-    def _merge(self, node1, node2):
-        # assert isinstance(node1, list) or not node1
-        # assert isinstance(node2, list) or not node2
-        node_type1 = self._get_node_type(node1)
-        node_type2 = self._get_node_type(node2)
-        if not node1:
-            return node2
-        if not node2:
-            return node1
-        if node_type1 != NODE_TYPE_BRANCH and node_type2 != NODE_TYPE_BRANCH:
-            descend_key1 = unpack_to_nibbles(node1[0])
-            descend_key2 = unpack_to_nibbles(node2[0])
-            # find longest common prefix
-            prefix_length = 0
-            for i in range(min(len(descend_key1), len(descend_key2))):
-                if descend_key1[i] != descend_key2[i]:
-                    break
-                prefix_length = i + 1
-            if prefix_length:
-                sub1 = self._decode_to_node(
-                    node1[1]) if node_type1 == NODE_TYPE_EXTENSION else node1[1]
-                new_sub1 = [
-                    pack_nibbles(descend_key1[prefix_length:]),
-                    sub1
-                ] if descend_key1[prefix_length:] else sub1
-                sub2 = self._decode_to_node(
-                    node2[1]) if node_type2 == NODE_TYPE_EXTENSION else node2[1]
-                new_sub2 = [
-                    pack_nibbles(descend_key2[prefix_length:]),
-                    sub2
-                ] if descend_key2[prefix_length:] else sub2
-                return [pack_nibbles(descend_key1[:prefix_length]),
-                        self._encode_node(self._merge(new_sub1, new_sub2))]
-
-        nodes = [[node1], [node2]]
-        for (node, node_type) in zip(nodes, [node_type1, node_type2]):
-            if node_type != NODE_TYPE_BRANCH:
-                new_node = [BLANK_NODE] * 17
-                curr_key = unpack_to_nibbles(node[0][0])
-                new_node[curr_key[0]] = self._encode_node([
-                    pack_nibbles(curr_key[1:]),
-                    node[0][1]
-                ]) if curr_key[0] < 16 and curr_key[1:] else node[0][1]
-                node[0] = new_node
-        node1, node2 = nodes[0][0], nodes[1][0]
-        assert len([i for i in range(17) if node1[i] and node2[i]]) <= 1
-        new_node = [
-            self._encode_node(
-                self._merge(
-                    self._decode_to_node(
-                        node1[i]), self._decode_to_node(
-                        node2[i]))) if node1[i] and node2[i] else node1[i] or node2[i] for i in range(17)]
-        return new_node
-
-    @classmethod
-    def unsafe_merge(cls, trie1, trie2):
-        t = Trie(trie1.db)
-        t.root_node = t._merge(trie1.root_node, trie2.root_node)
-        return t
-
-    def _iter(self, node, key, reverse=False, path=[]):
-        # print('iter', node, key, 'reverse =', reverse, 'path =', path)
-        node_type = self._get_node_type(node)
-
-        if node_type == NODE_TYPE_BLANK:
-            return None
-
-        elif node_type == NODE_TYPE_BRANCH:
-            # print('b')
-            if len(key):
-                sub_node = self._decode_to_node(node[key[0]])
-                o = self._iter(sub_node, key[1:], reverse, path + [key[0]])
-                if o is not None:
-                    # print('returning', [key[0]] + o, path)
-                    return [key[0]] + o
-            if reverse:
-                scan_range = reversed(list(range(key[0] if len(key) else 0)))
-            else:
-                scan_range = list(range(key[0] + 1 if len(key) else 0, 16))
-            for i in scan_range:
-                sub_node = self._decode_to_node(node[i])
-                # print('prelim getany', path+[i])
-                o = self._getany(sub_node, reverse, path + [i])
-                if o is not None:
-                    # print('returning', [i] + o, path)
-                    return [i] + o
-            if reverse and key and node[16]:
-                # print('o')
-                return [16]
-            return None
-
-        descend_key = without_terminator(unpack_to_nibbles(node[0]))
-        if node_type == NODE_TYPE_LEAF:
-            if reverse:
-                # print('L', descend_key, key, descend_key if descend_key < key else None, path)
-                return descend_key if descend_key < key else None
-            else:
-                # print('L', descend_key, key, descend_key if descend_key > key else None, path)
-                return descend_key if descend_key > key else None
-
-        if node_type == NODE_TYPE_EXTENSION:
-            # traverse child nodes
-            sub_node = self._decode_to_node(node[1])
-            sub_key = key[len(descend_key):]
-            # print('amhere', key, descend_key, descend_key > key[:len(descend_key)])
-            if starts_with(key, descend_key):
-                o = self._iter(sub_node, sub_key, reverse, path + descend_key)
-            elif descend_key > key[:len(descend_key)] and not reverse:
-                # print(1)
-                # print('prelim getany', path+descend_key)
-                o = self._getany(sub_node, False, path + descend_key)
-            elif descend_key < key[:len(descend_key)] and reverse:
-                # print(2)
-                # print('prelim getany', path+descend_key)
-                o = self._getany(sub_node, True, path + descend_key)
-            else:
-                o = None
-            # print('returning@', descend_key + o if o else None, path)
-            return descend_key + o if o else None
-
-    def next(self, key):
-        # print('nextting')
-        key = bin_to_nibbles(key)
-        o = self._iter(self.root_node, key)
-        # print('answer', o)
-        return nibbles_to_bin(without_terminator(o)) if o else None
-
-    def prev(self, key):
-        # print('prevving')
-        key = bin_to_nibbles(key)
-        o = self._iter(self.root_node, key, reverse=True)
-        # print('answer', o)
-        return nibbles_to_bin(without_terminator(o)) if o else None
-
-    def _delete_node_storage(self, node):
-        """delete storage
-        :param node: node in form of list, or BLANK_NODE
-        """
-        if node == BLANK_NODE:
-            return
-        # assert isinstance(node, list)
-        encoded = self._encode_node(node, put_in_db=False)
-        if len(encoded) < 32:
-            return
-        """
-        ===== FIXME ====
-        in the current trie implementation two nodes can share identical subtrees
-        thus we can not safely delete nodes for now
-        """
-        self.deletes.append(encoded)
-        # print('del', encoded, self.db.get_refcount(encoded))
-
-    def _delete(self, node, key):
-        """ update item inside a node
-
-        :param node: node in form of list, or BLANK_NODE
-        :param key: nibble list without terminator
-            .. note:: key may be []
-        :return: new node
-
-        if this node is changed to a new node, it's parent will take the
-        responsibility to *store* the new node storage, and delete the old
-        node storage
-        """
-        node_type = self._get_node_type(node)
-        if node_type == NODE_TYPE_BLANK:
-            return BLANK_NODE
-
-        if node_type == NODE_TYPE_BRANCH:
-            return self._delete_branch_node(node, key)
-
-        if is_key_value_type(node_type):
-            return self._delete_kv_node(node, key)
-
-    def _normalize_branch_node(self, node):
-        """node should have only one item changed
-        """
-        not_blank_items_count = sum(1 for x in range(17) if node[x])
-        assert not_blank_items_count >= 1
-
-        if not_blank_items_count > 1:
-            return node
-
-        # now only one item is not blank
-        not_blank_index = [i for i, item in enumerate(node) if item][0]
-
-        # the value item is not blank
-        if not_blank_index == 16:
-            return [pack_nibbles(with_terminator([])), node[16]]
-
-        # normal item is not blank
-        sub_node = self._decode_to_node(node[not_blank_index])
-        sub_node_type = self._get_node_type(sub_node)
-
-        if is_key_value_type(sub_node_type):
-            # collape subnode to this node, not this node will have same
-            # terminator with the new sub node, and value does not change
-            new_key = [not_blank_index] + \
-                unpack_to_nibbles(sub_node[0])
-            return [pack_nibbles(new_key), sub_node[1]]
-        if sub_node_type == NODE_TYPE_BRANCH:
-            return [pack_nibbles([not_blank_index]),
-                    self._encode_node(sub_node)]
-        assert False
-
-    def _delete_and_delete_storage(self, node, key):
-        old_node = node[:]
-        new_node = self._delete(node, key)
-        if old_node != new_node:
-            self._delete_node_storage(old_node)
-        return new_node
-
-    def _delete_branch_node(self, node, key):
-        # already reach the expected node
-        if not key:
-            node[-1] = BLANK_NODE
-            return self._normalize_branch_node(node)
-
-        encoded_new_sub_node = self._encode_node(
-            self._delete_and_delete_storage(
-                self._decode_to_node(node[key[0]]), key[1:])
-        )
-
-        if encoded_new_sub_node == node[key[0]]:
-            return node
-
-        node[key[0]] = encoded_new_sub_node
-        if encoded_new_sub_node == BLANK_NODE:
-            return self._normalize_branch_node(node)
-
-        return node
-
-    def _delete_kv_node(self, node, key):
-        node_type = self._get_node_type(node)
-        assert is_key_value_type(node_type)
-        curr_key = without_terminator(unpack_to_nibbles(node[0]))
-
-        if not starts_with(key, curr_key):
-            # key not found
-            return node
-
-        if node_type == NODE_TYPE_LEAF:
-            return BLANK_NODE if key == curr_key else node
-
-        # for inner key value type
-        new_sub_node = self._delete_and_delete_storage(
-            self._decode_to_node(node[1]), key[len(curr_key):])
-
-        if self._encode_node(new_sub_node) == node[1]:
-            return node
-
-        # new sub node is BLANK_NODE
-        if new_sub_node == BLANK_NODE:
-            return BLANK_NODE
-
-        # assert isinstance(new_sub_node, list)
-
-        # new sub node not blank, not value and has changed
-        new_sub_node_type = self._get_node_type(new_sub_node)
-
-        if is_key_value_type(new_sub_node_type):
-            # collape subnode to this node, not this node will have same
-            # terminator with the new sub node, and value does not change
-            new_key = curr_key + unpack_to_nibbles(new_sub_node[0])
-            return [pack_nibbles(new_key), new_sub_node[1]]
-
-        if new_sub_node_type == NODE_TYPE_BRANCH:
-            return [pack_nibbles(curr_key), self._encode_node(new_sub_node)]
-
-        # should be no more cases
-        assert False
-
-    def delete(self, key):
-        """
-        :param key: a string with length of [0, 32]
-        """
-        if not is_string(key):
-            raise Exception("Key must be string")
-
-        if len(key) > 32:
-            raise Exception("Max key length is 32")
-
-        self.root_node = self._delete_and_delete_storage(
-            self.root_node,
-            bin_to_nibbles(to_string(key)))
-        self._update_root_hash()
-
-    def _get_size(self, node):
-        """Get counts of (key, value) stored in this and the descendant nodes
-
-        :param node: node in form of list, or BLANK_NODE
-        """
-        if node == BLANK_NODE:
-            return 0
-
-        node_type = self._get_node_type(node)
-
-        if is_key_value_type(node_type):
-            value_is_node = node_type == NODE_TYPE_EXTENSION
-            if value_is_node:
-                return self._get_size(self._decode_to_node(node[1]))
-            else:
-                return 1
-        elif node_type == NODE_TYPE_BRANCH:
-            sizes = [self._get_size(self._decode_to_node(node[x]))
-                     for x in range(16)]
-            sizes = sizes + [1 if node[-1] else 0]
-            return sum(sizes)
-
-    def _iter_branch(self, node):
-        """yield (key, value) stored in this and the descendant nodes
-        :param node: node in form of list, or BLANK_NODE
-
-        .. note::
-            Here key is in full form, rather than key of the individual node
-        """
-        if node == BLANK_NODE:
-            raise StopIteration
-
-        node_type = self._get_node_type(node)
-
-        if is_key_value_type(node_type):
-            nibbles = without_terminator(unpack_to_nibbles(node[0]))
-            key = b'+'.join([to_string(x) for x in nibbles])
-            if node_type == NODE_TYPE_EXTENSION:
-                sub_tree = self._iter_branch(self._decode_to_node(node[1]))
-            else:
-                sub_tree = [(to_string(NIBBLE_TERMINATOR), node[1])]
-
-            # prepend key of this node to the keys of children
-            for sub_key, sub_value in sub_tree:
-                full_key = (key + b'+' + sub_key).strip(b'+')
-                yield (full_key, sub_value)
-
-        elif node_type == NODE_TYPE_BRANCH:
-            for i in range(16):
-                sub_tree = self._iter_branch(self._decode_to_node(node[i]))
-                for sub_key, sub_value in sub_tree:
-                    full_key = (
-                        str_to_bytes(
-                            str(i)) +
-                        b'+' +
-                        sub_key).strip(b'+')
-                    yield (full_key, sub_value)
-            if node[16]:
-                yield (to_string(NIBBLE_TERMINATOR), node[-1])
-
-    def iter_branch(self):
-        for key_str, value in self._iter_branch(self.root_node):
-            if key_str:
-                nibbles = [int(x) for x in key_str.split(b'+')]
-            else:
-                nibbles = []
-            key = nibbles_to_bin(without_terminator(nibbles))
-            yield key, value
-
-    def _to_dict(self, node):
-        """convert (key, value) stored in this and the descendant nodes
-        to dict items.
-
-        :param node: node in form of list, or BLANK_NODE
-
-        .. note::
-
-            Here key is in full form, rather than key of the individual node
-        """
-        if node == BLANK_NODE:
-            return {}
-
-        node_type = self._get_node_type(node)
-
-        if is_key_value_type(node_type):
-            nibbles = without_terminator(unpack_to_nibbles(node[0]))
-            key = b'+'.join([to_string(x) for x in nibbles])
-            if node_type == NODE_TYPE_EXTENSION:
-                sub_dict = self._to_dict(self._decode_to_node(node[1]))
-            else:
-                sub_dict = {to_string(NIBBLE_TERMINATOR): node[1]}
-
-            # prepend key of this node to the keys of children
-            res = {}
-            for sub_key, sub_value in sub_dict.items():
-                full_key = (key + b'+' + sub_key).strip(b'+')
-                res[full_key] = sub_value
-            return res
-
-        elif node_type == NODE_TYPE_BRANCH:
-            res = {}
-            for i in range(16):
-                sub_dict = self._to_dict(self._decode_to_node(node[i]))
-
-                for sub_key, sub_value in sub_dict.items():
-                    full_key = (
-                        str_to_bytes(
-                            str(i)) +
-                        b'+' +
-                        sub_key).strip(b'+')
-                    res[full_key] = sub_value
-
-            if node[16]:
-                res[to_string(NIBBLE_TERMINATOR)] = node[-1]
-            return res
-
-    def to_dict(self):
-        d = self._to_dict(self.root_node)
-        res = {}
-        for key_str, value in d.items():
-            if key_str:
-                nibbles = [int(x) for x in key_str.split(b'+')]
-            else:
-                nibbles = []
-            key = nibbles_to_bin(without_terminator(nibbles))
-            res[key] = value
-        return res
+        self.root = value
+        assert isinstance(self.root, bytes)
 
     def get(self, key):
-        return self._get(self.root_node, bin_to_nibbles(to_string(key)))
+        assert len(key) == 32
+        return _get(self.db, self.root, encode_bin(key))
 
-    def __len__(self):
-        return self._get_size(self.root_node)
-
-    def __getitem__(self, key):
-        return self.get(key)
-
-    def __setitem__(self, key, value):
-        return self.update(key, value)
-
-    def __delitem__(self, key):
-        return self.delete(key)
-
-    def __iter__(self):
-        return iter(self.to_dict())
-
-    def __contains__(self, key):
-        return self.get(key) != BLANK_NODE
+    def get_branch(self, key):
+        assert len(key) == 32
+        if(self.root == b''):
+            return []
+        o = _get_branch(self.db, self.root, encode_bin(key))
+        # assert _verify_branch(o, self.root, self.get(key))
+        return o
 
     def update(self, key, value):
-        """
-        :param key: a string
-        :value: a string
-        """
-        if not is_string(key):
-            raise Exception("Key must be string")
+        assert len(key) == 32
+        self.root = _update(self.db, self.root, encode_bin(key), value)
 
-        # if len(key) > 32:
-        #     raise Exception("Max key length is 32")
+    def to_dict(self, hexify=False):
+        o = print_and_check_invariants(self.db, self.root)
+        encoder = lambda x: encode_hex(x) if hexify else x
+        return {encoder(decode_bin(k)): v for k, v in o.items()}
 
-        if not is_string(value):
-            raise Exception("Value must be string")
-
-        # if value == '':
-        #     return self.delete(key)
-        self.root_node = self._update_and_delete_storage(
-            self.root_node,
-            bin_to_nibbles(to_string(key)),
-            to_string(value))
-        self._update_root_hash()
-
-    def root_hash_valid(self):
-        if self.root_hash == BLANK_ROOT:
-            return True
-        return self.root_hash in self.db
-
-
-if __name__ == "__main__":
-    import sys
-    from . import db
-
-    _db = db.DB(sys.argv[2])
-
-    def encode_node(nd):
-        if is_string(nd):
-            return encode_hex(nd)
-        else:
-            return encode_hex(rlp_encode(nd))
-
-    if len(sys.argv) >= 2:
-        if sys.argv[1] == 'insert':
-            t = Trie(_db, decode_hex(sys.argv[3]))
-            t.update(sys.argv[4], sys.argv[5])
-            print(encode_node(t.root_hash))
-        elif sys.argv[1] == 'get':
-            t = Trie(_db, decode_hex(sys.argv[3]))
-            print(t.get(sys.argv[4]))
+    def print_nodes(self):
+        print_nodes(self.db, self.root)        

@@ -77,8 +77,9 @@ class Account(rlp.Serializable):
         for k, v in self.storage_cache.items():
             if v:
                 self.storage_trie.update(utils.encode_int32(k), rlp.encode(v))
-            else:
-                self.storage_trie.delete(utils.encode_int32(k))
+            # Trie don't support delete for the moment
+            # else:
+            #     self.storage_trie.delete(utils.encode_int32(k))
         self.storage_cache = {}
         self.storage = self.storage_trie.root_hash
 
@@ -173,7 +174,7 @@ class State():
                 rlpdata = b''
         else:
             rlpdata = self.trie.get(address)
-        if rlpdata != trie.BLANK_NODE:
+        if rlpdata not in (b'', None):
             o = rlp.decode(rlpdata, Account, env=self.env, address=address)
         else:
             o = Account.blank_account(
@@ -361,21 +362,24 @@ class State():
         for addr, acct in self.cache.items():
             if acct.touched or acct.deleted:
                 acct.commit()
-                self.deletes.extend(acct.storage_trie.deletes)
+                # Trie don't support delete for the moment
+                # self.deletes.extend(acct.storage_trie.deletes)
                 self.changed[addr] = True
                 if self.account_exists(addr) or allow_empties:
                     self.trie.update(addr, rlp.encode(acct))
                     if self.executing_on_head:
                         self.db.put(b'address:' + addr, rlp.encode(acct))
                 else:
-                    self.trie.delete(addr)
+                     # Trie don't support delete for the moment
+                    # self.trie.delete(addr)
                     if self.executing_on_head:
                         try:
                             self.db.delete(b'address:' + addr)
                         except KeyError:
                             pass
-        self.deletes.extend(self.trie.deletes)
-        self.trie.deletes = []
+        # Trie don't support delete for the moment
+        # self.deletes.extend(self.trie.deletes)
+        # self.trie.deletes = []
         self.cache = {}
         self.journal = []
 
