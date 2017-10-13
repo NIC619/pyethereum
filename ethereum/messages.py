@@ -208,15 +208,15 @@ def apply_transaction(state, tx):
     # Apply gas cost of reading accounts in read/write list
     # OPTION1: add msg.sender, msg.to, new contract address to read/write list if not included already
     if tx.to != b'':
-        tx.read_list = set(tx.read_list) | set([tx.sender, tx.to])
-        tx.write_list = set(tx.write_list) | set([tx.sender, tx.to])
+        tx.read_list = list(set(tx.read_list) | set([tx.sender, tx.to]))
+        tx.write_list = list(set(tx.write_list) | set([tx.sender, tx.to]))
     else:
         if state.is_CONSTANTINOPLE():
             new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
         else:
             new_address = utils.mk_contract_address(tx.sender, tx.nonce)
-        tx.read_list = set(tx.read_list) | set([tx.sender, new_address])
-        tx.write_list = set(tx.write_list) | set([tx.sender, new_address])
+        tx.read_list = list(set(tx.read_list) | set([tx.sender, new_address]))
+        tx.write_list = list(set(tx.write_list) | set([tx.sender, new_address]))
     # OPTION 2: throw excetion directly if these address not included in read/write list
     # if tx.to != b'':
     #     if not set([tx.sender, tx.to]).issubset(tx.read_write_union_list):
@@ -383,8 +383,8 @@ class VMExt():
          # self.gathering_mode is used to indicate that vm will be
         # gathering accounts that data are read from/written to.
         self.gathering_mode = False
-        self.read_list = set(tx.read_list) if tx else set()
-        self.write_list = set(tx.write_list) if tx else set()
+        self.read_list = list(set(tx.read_list)) if tx else list()
+        self.write_list = list(set(tx.write_list)) if tx else list()
         self.storage_modified_list = set()  # list of accounts whose storage is modified
         self.record_read_list = set()       # list of accounts that data are read from
         self.record_write_list = set()      # list of accounts that data are written to
