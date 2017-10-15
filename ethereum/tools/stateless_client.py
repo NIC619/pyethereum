@@ -30,6 +30,24 @@ def verify_merkle_proof(branch, root, value):
     assert branch and root and value
     return trie._verify_branch(branch, root, value)
 
+def store_merkle_branch_nodes(db, branch):
+    """Store the nodes of the merkle proof branch in db
+    """
+    nodes = [branch[-1]]
+    trie.hash_and_save(db, nodes[0])
+    for data in branch[-2::-1]:
+        marker, node = data[0], data[1:]
+        if marker == 1:
+            node = trie.decode_bin_path(node)
+            nodes.insert(0, trie.encode_kv_node(node, sha3(nodes[0])))
+        elif marker == 2:
+            nodes.insert(0, trie.encode_branch_node(sha3(nodes[0]), node))
+        elif marker == 3:
+            nodes.insert(0, trie.encode_branch_node(node, sha3(nodes[0])))
+        else:
+            raise Exception("Corrupted branch")
+        trie.hash_and_save(db, nodes[0])
+
 def mk_account_proof_wrapper(db, blk, acct):
     """Generate a merkle proof wrapper for a given account in a given block
 
@@ -42,9 +60,11 @@ def mk_account_proof_wrapper(db, blk, acct):
     """
     proof_wrapper = {}
     proof_wrapper['blk_number'] = blk.number
-    proof_wrapper['state_root'] = '0x'+encode_hex(blk.header.state_root)
+    # proof_wrapper['state_root'] = '0x'+encode_hex(blk.header.state_root)
+    proof_wrapper['state_root'] = blk.header.state_root
     rlpdata = trie._get(db, blk.header.state_root, trie.encode_bin(sha3(acct)))
-    proof_wrapper['rlpdata'] = '0x'+encode_hex(rlpdata) if rlpdata else b''
+    # proof_wrapper['rlpdata'] = '0x'+encode_hex(rlpdata) if rlpdata else b''
+    proof_wrapper['rlpdata'] = rlpdata if rlpdata else b''
     proof_wrapper['merkle_proof'] = get_merkle_proof(db, blk.header.state_root, acct) if rlpdata else []
     proof_wrapper['exist_yet'] = True if rlpdata else False
     return proof_wrapper
