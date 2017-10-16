@@ -48,7 +48,7 @@ def store_merkle_branch_nodes(db, branch):
             raise Exception("Corrupted branch")
         trie.hash_and_save(db, nodes[0])
 
-def mk_account_proof_wrapper(db, blk, acct):
+def mk_account_proof_wrapper(db, blk_header, acct):
     """Generate a merkle proof wrapper for a given account in a given block
 
     The wrapper includes the
@@ -59,12 +59,26 @@ def mk_account_proof_wrapper(db, blk, acct):
     5.indicator of whether the account is newly created
     """
     proof_wrapper = {}
-    proof_wrapper['blk_number'] = blk.number
-    # proof_wrapper['state_root'] = '0x'+encode_hex(blk.header.state_root)
-    proof_wrapper['state_root'] = blk.header.state_root
-    rlpdata = trie._get(db, blk.header.state_root, trie.encode_bin(sha3(acct)))
+    proof_wrapper['blk_number'] = blk_header.number
+    # proof_wrapper['state_root'] = '0x'+encode_hex(blk_header.state_root)
+    proof_wrapper['state_root'] = blk_header.state_root
+    rlpdata = trie._get(db, blk_header.state_root, trie.encode_bin(sha3(acct)))
     # proof_wrapper['rlpdata'] = '0x'+encode_hex(rlpdata) if rlpdata else b''
     proof_wrapper['rlpdata'] = rlpdata if rlpdata else b''
-    proof_wrapper['merkle_proof'] = get_merkle_proof(db, blk.header.state_root, acct) if rlpdata else []
+    proof_wrapper['merkle_proof'] = get_merkle_proof(db, blk_header.state_root, acct) if rlpdata else []
     proof_wrapper['exist_yet'] = True if rlpdata else False
     return proof_wrapper
+
+def mk_tx_bundle(db, tx, blk_header):
+    tx_bundle = {"tx_data": tx.to_dict()}
+    read_list_proof = []
+    for acct in tx.read_list:
+        o = mk_account_proof_wrapper(db, blk_header, acct)
+        read_list_proof.append({acct: o})
+    tx_bundle["read_list_proof"] = read_list_proof
+    write_list_proof = []
+    for acct in tx.write_list:
+        o = mk_account_proof_wrapper(db, blk_header, acct)
+        write_list_proof.append({acct: o})
+    tx_bundle["write_list_proof"] = write_list_proof
+    return tx_bundle
