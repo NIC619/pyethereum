@@ -115,7 +115,11 @@ def _get(db, node, keypath):
     # Empty trie
     if not node:
         return None
-    L, R, nodetype = parse_node(db.get(node))
+    try:
+        L, R, nodetype = parse_node(db.get(node))
+    except:
+        return None
+    # L, R, nodetype = parse_node(db.get(node))
     # Key-value node descend
     if nodetype == LEAF_TYPE:
         return R

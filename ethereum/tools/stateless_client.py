@@ -69,16 +69,21 @@ def mk_account_proof_wrapper(db, blk_header, acct):
     proof_wrapper['exist_yet'] = True if rlpdata else False
     return proof_wrapper
 
-def mk_tx_bundle(db, tx, blk_header):
+def mk_tx_bundle(db, tx, prev_blk_header, cur_blk_header):
     tx_bundle = {"tx_data": tx.to_dict()}
     read_list_proof = []
     for acct in tx.read_list:
-        o = mk_account_proof_wrapper(db, blk_header, acct)
+        o = mk_account_proof_wrapper(db, prev_blk_header, acct)
         read_list_proof.append({acct: o})
     tx_bundle["read_list_proof"] = read_list_proof
     write_list_proof = []
     for acct in tx.write_list:
-        o = mk_account_proof_wrapper(db, blk_header, acct)
+        o = mk_account_proof_wrapper(db, prev_blk_header, acct)
         write_list_proof.append({acct: o})
     tx_bundle["write_list_proof"] = write_list_proof
+    updated_acct_list = []
+    for acct in tx.read_write_union_list:
+        o = mk_account_proof_wrapper(db, cur_blk_header, acct)
+        updated_acct_list.append({acct: o})
+    tx_bundle["updated_acct_proof"] = updated_acct_list
     return tx_bundle
