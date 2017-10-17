@@ -539,7 +539,7 @@ def vm_execute(ext, msg, code):
             elif op == 'SLOAD':
                 # This is the legacy storage layout 
                 s0 = stk.pop()
-                storage = ext.get_storage_data(msg.to)
+                storage = bytearray(ext.get_storage_data(msg.to))
                 if s0 > len(storage) // 32:
                     return vm_exception("STORAGE OUT OF BOUND")
                 if ext.post_anti_dos_hardfork():
@@ -552,7 +552,7 @@ def vm_execute(ext, msg, code):
                 stk.append(utils.bytes_to_int(storage[s0*32 : s0*32+32 ]))
                 # This is the new storage layout
                 # s0 = stk.pop()
-                # storage = ext.get_storage_data(msg.to)
+                # storage = bytearray(ext.get_storage_data(msg.to))
                 # if ext.post_anti_dos_hardfork():
                 #     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
                 #         return vm_exception("OUT OF GAS")
@@ -579,7 +579,7 @@ def vm_execute(ext, msg, code):
                 else:
                     gascost = opcodes.GACCOUNTEDITCOST
                     ext.storage_modified_list.add(msg.to)
-                storage = ext.get_storage_data(msg.to)
+                storage = bytearray(ext.get_storage_data(msg.to))
                 # EXPANSION COST
                 if s0 >= len(storage) // 32:
                     expandsize = (s0+1) * 32 - len(storage)
@@ -605,7 +605,7 @@ def vm_execute(ext, msg, code):
                 # else:
                 #     gascost = opcodes.GACCOUNTEDITCOST
                 #     ext.storage_modified_list.add(msg.to)
-                # storage = ext.get_storage_data(msg.to)
+                # storage = bytearray(ext.get_storage_data(msg.to))
                 # # EXPANSION COST
                 # if not stg_extend(storage, compustate, s0, 32):
                 #     return vm_exception('OOG EXTENDING STORAGE')
@@ -631,7 +631,7 @@ def vm_execute(ext, msg, code):
                     gascost = opcodes.GACCOUNTEDITCOST
                     ext.storage_modified_list.add(msg.to)
                 gascost -= 3
-                storage = ext.get_storage_data(msg.to)
+                storage = bytearray(ext.get_storage_data(msg.to))
                 # EXPANSION COST
                 expandsize = (storage_start) * 32 + msize_rounded - len(storage)
                 if expandsize > 0:
@@ -662,7 +662,7 @@ def vm_execute(ext, msg, code):
                 #     gascost = opcodes.GACCOUNTEDITCOST
                 #     ext.storage_modified_list.add(msg.to)
                 # gascost -= 3
-                # storage = ext.get_storage_data(msg.to)
+                # storage = bytearray(ext.get_storage_data(msg.to))
                 # EXPANSION COST
                 # if not stg_extend(storage, compustate, storage_start, msize_rounded):
                 #     return vm_exception('OOG EXTENDING STORAGE')
