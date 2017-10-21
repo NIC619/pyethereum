@@ -226,7 +226,7 @@ def apply_transaction(state, _tx, require_rw_list_strict=True):
     else:
         if tx.to != b'':
             if (not set([tx.sender, tx.to]).issubset(set(tx.read_list))
-                and not set([tx.sender, tx.to]).issubset(set(tx.write_list))):
+                or not set([tx.sender, tx.to]).issubset(set(tx.write_list))):
                 raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
         else:
             if state.is_CONSTANTINOPLE():
@@ -234,7 +234,7 @@ def apply_transaction(state, _tx, require_rw_list_strict=True):
             else:
                 new_address = utils.mk_contract_address(tx.sender, tx.nonce)
             if (not set([tx.sender, new_address]).issubset(set(tx.read_list))
-                and not set([tx.sender, new_address]).issubset(set(tx.write_list))):
+                or not set([tx.sender, new_address]).issubset(set(tx.write_list))):
                 raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
 
     intrinsic_gas = tx.intrinsic_gas_used
