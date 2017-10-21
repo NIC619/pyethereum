@@ -65,16 +65,16 @@ class Account(rlp.Serializable):
         self.env = env
         self.address = address
         super(Account, self).__init__(nonce, balance, storage, code_hash)
-        self.storage_cache = bytearray()
+        self.storage_cache = bytes()
         self.touched = False
         self.existent_at_start = True
         self._mutable = True
         self.deleted = False
 
     def commit(self):
-        self.env.db.put(utils.sha3(bytes(self.storage_cache)), self.storage_cache)
-        self.storage = utils.sha3(bytes(self.storage_cache))
-        self.storage_cache = bytearray()
+        self.env.db.put(utils.sha3(self.storage_cache), self.storage_cache)
+        self.storage = utils.sha3(self.storage_cache)
+        self.storage_cache = bytes()
 
     @property
     def code(self):
@@ -118,7 +118,7 @@ class Account(rlp.Serializable):
 
     def to_dict(self):
         return {'balance': str(self.balance), 'nonce': str(self.nonce), 'code': '0x' + encode_hex(self.code),
-                'storage': str(bytes(self.get_storage_data()))}
+                'storage': str(self.get_storage_data())}
 
 
 # from ethereum.state import State
@@ -395,7 +395,7 @@ class State():
     def reset_storage(self, address):
         acct = self.get_and_cache_account(address)
         pre_cache = acct.storage_cache
-        acct.storage_cache = bytearray()
+        acct.storage_cache = bytes()
         self.journal.append(lambda: setattr(acct, 'storage_cache', pre_cache))
         pre_root = acct.storage
         self.journal.append(

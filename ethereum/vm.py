@@ -539,7 +539,7 @@ def vm_execute(ext, msg, code):
             elif op == 'SLOAD':
                 # This is the legacy storage layout 
                 s0 = stk.pop()
-                storage = ext.get_storage_data(msg.to)
+                storage = bytearray(ext.get_storage_data(msg.to))
                 if s0 > len(storage) // 32:
                     return vm_exception("STORAGE OUT OF BOUND")
                 if ext.post_anti_dos_hardfork():
@@ -549,10 +549,10 @@ def vm_execute(ext, msg, code):
                     return vm_exception("READ ACCESS VIOLATION")
                 if ext.gathering_mode:
                     ext.record_read_list.add(msg.to)
-                stk.append(utils.bytes_to_int(storage[s0*32 : s0*32+32 ]))
+                stk.append(utils.bytes_to_int(bytes(storage[s0*32 : s0*32+32])))
                 # This is the new storage layout
                 # s0 = stk.pop()
-                # storage = ext.get_storage_data(msg.to)
+                # storage = bytearray(ext.get_storage_data(msg.to))
                 # if ext.post_anti_dos_hardfork():
                 #     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
                 #         return vm_exception("OUT OF GAS")
@@ -562,7 +562,7 @@ def vm_execute(ext, msg, code):
                 #     ext.record_read_list.add(msg.to)
                 # # Append zero bytes if read beyond the boung
                 # padded_storage = utils.rzpad(storage[s0 : s0+32], 32)
-                # stk.append(utils.bytes_to_int(padded_storage))
+                # stk.append(utils.bytes_to_int(bytes(padded_storage)))
             elif op == 'SSTORE':
                 # This is the legacy storage layout
                 s0, s1 = stk.pop(), stk.pop()
@@ -579,7 +579,7 @@ def vm_execute(ext, msg, code):
                 else:
                     gascost = opcodes.GACCOUNTEDITCOST
                     ext.storage_modified_list.add(msg.to)
-                storage = ext.get_storage_data(msg.to)
+                storage = bytearray(ext.get_storage_data(msg.to))
                 # EXPANSION COST
                 if s0 >= len(storage) // 32:
                     expandsize = (s0+1) * 32 - len(storage)
@@ -589,7 +589,7 @@ def vm_execute(ext, msg, code):
                     compustate.gas -= gascost
                     storage.extend(bytearray(expandsize))
                 storage[s0*32 : s0*32 + 32] = utils.encode_int32(s1)
-                ext.set_storage_data(msg.to, storage)
+                ext.set_storage_data(msg.to, bytes(storage))
                 # This is the new storage layout 
                 # s0, s1 = stk.pop(), stk.pop()
                 # if msg.static:
@@ -605,12 +605,12 @@ def vm_execute(ext, msg, code):
                 # else:
                 #     gascost = opcodes.GACCOUNTEDITCOST
                 #     ext.storage_modified_list.add(msg.to)
-                # storage = ext.get_storage_data(msg.to)
+                # storage = bytearray(ext.get_storage_data(msg.to))
                 # # EXPANSION COST
                 # if not stg_extend(storage, compustate, s0, 32):
                 #     return vm_exception('OOG EXTENDING STORAGE')
                 # storage[s0 : s0 + 32] = utils.encode_int32(s1)
-                # ext.set_storage_data(msg.to, storage)
+                # ext.set_storage_data(msg.to, bytes(storage))
             elif op == 'SCOPY':
                 # This is the legacy storage layout 
                 mstart, msize, storage_start = stk.pop(), stk.pop(), stk.pop()
@@ -631,7 +631,7 @@ def vm_execute(ext, msg, code):
                     gascost = opcodes.GACCOUNTEDITCOST
                     ext.storage_modified_list.add(msg.to)
                 gascost -= 3
-                storage = ext.get_storage_data(msg.to)
+                storage = bytearray(ext.get_storage_data(msg.to))
                 # EXPANSION COST
                 expandsize = (storage_start) * 32 + msize_rounded - len(storage)
                 if expandsize > 0:
@@ -642,7 +642,7 @@ def vm_execute(ext, msg, code):
                 compustate.gas -= gascost
                 for i in range(msize_rounded // 32):
                     storage[(storage_start+i)*32 : (storage_start+i)*32 + 32] = mem[mstart+i*32 : mstart+(i+1)*32]
-                ext.set_storage_data(msg.to, storage)
+                ext.set_storage_data(msg.to, bytes(storage))
                 # This is the new storage layout 
                 # mstart, msize, storage_start = stk.pop(), stk.pop(), stk.pop()
                 # msize_rounded = utils.ceil32(msize)
@@ -662,12 +662,12 @@ def vm_execute(ext, msg, code):
                 #     gascost = opcodes.GACCOUNTEDITCOST
                 #     ext.storage_modified_list.add(msg.to)
                 # gascost -= 3
-                # storage = ext.get_storage_data(msg.to)
+                # storage = bytearray(ext.get_storage_data(msg.to))
                 # EXPANSION COST
                 # if not stg_extend(storage, compustate, storage_start, msize_rounded):
                 #     return vm_exception('OOG EXTENDING STORAGE')
                 # storage[storage_start : storage_start+msize_rounded] = mem[mstart : mstart+msize_rounded]
-                # ext.set_storage_data(msg.to, storage)
+                # ext.set_storage_data(msg.to, bytes(storage))
             elif op == 'JUMP':
                 compustate.pc = stk.pop()
                 if compustate.pc >= codelen or not (
