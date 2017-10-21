@@ -286,7 +286,7 @@ def _get_branch(db, node, keypath):
             return [b'\x03'+L] + _get_branch(db, R, keypath[1:])
 
 # Verify a Merkle proof
-def _verify_branch(branch, root, value):
+def _verify_branch(branch, root, keypath, value):
     nodes = [branch[-1]]
     _keypath = b''
     for data in branch[-2::-1]:
@@ -306,10 +306,12 @@ def _verify_branch(branch, root, value):
             nodes.insert(0, encode_branch_node(node, sha3(nodes[0])))
         else:
             raise Exception("Foo")
+    if value:
+        assert _keypath == keypath
     assert sha3(nodes[0]) == root
     db = EphemDB()
     db.kv = {sha3(node): node for node in nodes}
-    assert _get(db, root, _keypath) == value
+    assert _get(db, root, keypath) == value
     return True
 
 
@@ -336,10 +338,9 @@ class Trie():
 
     def get_branch(self, key):
         assert len(key) == 32
-        if(self.root == b''):
+        if(self.root == BLANK_ROOT):
             return []
         o = _get_branch(self.db, self.root, encode_bin(key))
-        # assert _verify_branch(o, self.root, self.get(key))
         return o
 
     def update(self, key, value):
