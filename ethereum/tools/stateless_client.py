@@ -61,21 +61,86 @@ def mk_account_proof_wrapper(db, blk_header, acct):
     proof_wrapper['merkle_proof'] = get_merkle_proof(db, blk_header.state_root, acct)
     return proof_wrapper
 
-def mk_tx_bundle(db, tx, prev_blk_header, cur_blk_header):
-    tx_bundle = {"tx_data": tx.to_dict()}
+def mk_pending_tx_bundle(db, tx, latest_blk_header):
+    """Generate transaction bundle for pending transaction which
+
+    includes transaction itself and merkle proof for accounts in
+
+    read/write list of the transaction
+    """
+    from ethereum.transactions import Transaction
+    tx_bundle = {"tx_data": rlp.encode(tx, Transaction)}
     read_list_proof = []
-    for acct in tx.read_list + (prev_blk_header.coinbase,):
+    for acct in tx.read_list:
+        o = mk_account_proof_wrapper(db, latest_blk_header, acct)
+        read_list_proof.append({acct: o})
+    tx_bundle["read_list_proof"] = read_list_proof
+    write_list_proof = []
+    for acct in tx.write_list:
+        o = mk_account_proof_wrapper(db, latest_blk_header, acct)
+        write_list_proof.append({acct: o})
+    tx_bundle["write_list_proof"] = write_list_proof
+
+def mk_confirmed_tx_bundle(db, tx, prev_blk_header, latest_blk_header):
+    """Generate transaction bundle for confirmed transaction which
+
+    includes two part:
+    
+    the first part includes transaction itself, merkle proof for accounts in
+
+    read/write list of the transaction and merkle proof for coinbase account
+
+    the second part, `updated_acct_proof`, provides updated data and merkle proof
+    
+    for coinbase account and accounts in read/write list so that stateless client
+
+    can just update the state trie after verifying the proofs
+    """
+    from ethereum.transactions import Transaction
+    tx_bundle = {"tx_data": rlp.encode(tx, Transaction)}
+    read_list_proof = []
+    for acct in tx.read_list + (latest_blk_header.coinbase,):
         o = mk_account_proof_wrapper(db, prev_blk_header, acct)
         read_list_proof.append({acct: o})
     tx_bundle["read_list_proof"] = read_list_proof
     write_list_proof = []
-    for acct in tx.write_list + (prev_blk_header.coinbase,):
+    for acct in tx.write_list + (latest_blk_header.coinbase,):
         o = mk_account_proof_wrapper(db, prev_blk_header, acct)
         write_list_proof.append({acct: o})
     tx_bundle["write_list_proof"] = write_list_proof
     updated_acct_list = []
-    for acct in tx.read_write_union_list | set(prev_blk_header.coinbase):
-        o = mk_account_proof_wrapper(db, cur_blk_header, acct)
+    for acct in tx.read_write_union_list | set(latest_blk_header.coinbase):
+        o = mk_account_proof_wrapper(db, latest_blk_header, acct)
         updated_acct_list.append({acct: o})
     tx_bundle["updated_acct_proof"] = updated_acct_list
     return tx_bundle
+
+def verify_tx_bundle(env, state_root, coinbase, tx_bundle):
+    # Initialize a ephemeral state
+    from ethereum.state import State
+    from ethereum.db import EphemDB, RefcountDB
+    from ethereum.messages import apply_transaction
+    ephem_state = State(state_root, env)
+    ephem_state.trie.db = RefcountDB(EphemDB())
+    ephem_state.trie.db.put(sha3(b''), b'')
+    ephem_state.block_coinbase = coinbase
+
+    # Verify merkle proofs and store the nodes in state trie
+    for acct_proof_wrapper in tx_bundle["read_list_proof"]:
+        for acct, wrapper in acct_proof_wrapper.items():
+            assert state_root == wrapper["state_root"]
+            assert verify_merkle_proof(wrapper["merkle_proof"], wrapper["state_root"], sha3(acct), wrapper["rlpdata"])
+            # Store the new account data after verifying the proof
+            store_merkle_branch_nodes(ephem_state.trie.db, wrapper["merkle_proof"])
+    # Do the same to write list proof
+    for acct_proof_wrapper in tx_bundle["write_list_proof"]:
+        for acct, wrapper in acct_proof_wrapper.items():
+            assert state_root == wrapper["state_root"]
+            assert verify_merkle_proof(wrapper["merkle_proof"], wrapper["state_root"], sha3(acct), wrapper["rlpdata"])
+            # Store the new account data after verifying the proof
+            store_merkle_branch_nodes(ephem_state.trie.db, wrapper["merkle_proof"])
+
+    # Apply and verify the transaction
+    from ethereum.transactions import Transaction
+    success, _ = apply_transaction(ephem_state, rlp.decode(tx_bundle["tx_data"], Transaction))
+    return success
