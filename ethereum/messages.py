@@ -199,7 +199,11 @@ def apply_message(state, msg=None, **kwargs):
     return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list) if result else (None, [], [])
 
 
-def apply_transaction(state, tx, require_rw_list_strict=True):
+def apply_transaction(state, _tx, require_rw_list_strict=True):
+    # Avoid altering the actual tx data
+    from copy import copy
+    tx = copy(_tx)
+
     state.logs = []
     state.suicides = []
     state.refunds = 0
