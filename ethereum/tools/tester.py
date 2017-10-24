@@ -100,7 +100,9 @@ class ABIContract(object):  # pylint: disable=too-few-public-methods
                 value=kwargs.get('value', 0),
                 data=self.translator.encode(function_name, args),
                 startgas=kwargs.get('startgas', STARTGAS),
-                gasprice=kwargs.get('gasprice', GASPRICE)
+                gasprice=kwargs.get('gasprice', GASPRICE),
+                read_list=kwargs.get('read_list', None),
+                write_list=kwargs.get('write_list', None)
             )
 
             if result is False:
@@ -128,21 +130,23 @@ class State(object):
     def __init__(self, genesis):
         self.state = genesis
 
-    def tx(self, sender=k0, to=b'\x00' * 20, value=0,
-           data=b'', startgas=STARTGAS, gasprice=GASPRICE):
+    def tx(self, sender=k0, to=b'\x00' * 20, value=0, data=b'', startgas=STARTGAS,
+           gasprice=GASPRICE, read_list=None, write_list=None):
         sender_addr = privtoaddr(sender)
-        transaction = Transaction(self.state.get_nonce(sender_addr), gasprice, startgas,
-                                  to, value, data).sign(sender)
+        transaction = Transaction(
+            self.state.get_nonce(sender_addr), gasprice, startgas, to,
+            value, data, read_list=read_list, write_list=write_list
+        ).sign(sender)
         success, output = apply_transaction(self.state, transaction)
         if not success:
             raise TransactionFailed()
         return output
 
-    def call(self, sender=k0, to=b'\x00' * 20, value=0,
-             data=b'', startgas=STARTGAS, gasprice=GASPRICE):
+    def call(self, sender=k0, to=b'\x00' * 20, value=0, data=b'', startgas=STARTGAS,
+             gasprice=GASPRICE, read_list=None, write_list=None):
         self.state.commit()
         sender_addr = privtoaddr(sender)
-        result = apply_message(
+        result, r_list, wr_list = apply_message(
             self.state.ephemeral_clone(),
             sender=sender_addr,
             to=to,
@@ -185,20 +189,22 @@ class Chain(object):
             raise TransactionFailed()
         return output
 
-    def tx(self, sender=k0, to=b'\x00' * 20, value=0,
-           data=b'', startgas=STARTGAS, gasprice=GASPRICE):
+    def tx(self, sender=k0, to=b'\x00' * 20, value=0, data=b'', startgas=STARTGAS,
+           gasprice=GASPRICE, read_list=None, write_list=None):
         sender_addr = privtoaddr(sender)
         self.last_sender = sender
-        transaction = Transaction(self.head_state.get_nonce(sender_addr), gasprice, startgas,
-                                  to, value, data).sign(sender)
+        transaction = Transaction(
+            self.head_state.get_nonce(sender_addr), gasprice, startgas,
+            to, value, data, read_list=read_list, write_list=write_list
+        ).sign(sender)
         output = self.direct_tx(transaction)
         return output
 
-    def call(self, sender=k0, to=b'\x00' * 20, value=0,
-             data=b'', startgas=STARTGAS, gasprice=GASPRICE):
+    def call(self, sender=k0, to=b'\x00' * 20, value=0, data=b'', startgas=STARTGAS,
+             gasprice=GASPRICE, read_list=None, write_list=None):
         self.head_state.commit()
         sender_addr = privtoaddr(sender)
-        result = apply_message(
+        result, r_list, wr_list = apply_message(
             self.head_state.ephemeral_clone(),
             sender=sender_addr,
             to=to,
@@ -218,14 +224,16 @@ class Chain(object):
                 self.head_state.receipts[-2].gas_used
         return diff - (not with_tx) * self.last_tx.intrinsic_gas_used
 
-    def contract(self, sourcecode, args=[], sender=k0, value=0,
-                 language=None, l=None, startgas=STARTGAS, gasprice=GASPRICE):
+    def contract(self, sourcecode, args=[], sender=k0, value=0, language=None, l=None,
+                 startgas=STARTGAS, gasprice=GASPRICE, read_list=None, write_list=None):
         assert not (l and language)
         language = l or language
         if language == 'evm':
             assert len(args) == 0
-            return self.tx(sender=sender, to=b'', value=value,
-                           data=sourcecode, startgas=startgas, gasprice=gasprice)
+            return self.tx(
+                sender=sender, to=b'', value=value, data=sourcecode, startgas=startgas,
+                gasprice=gasprice, read_list=read_list, write_list=write_list
+            )
         else:
             compiler = languages[language]
             interface = compiler.mk_full_signature(sourcecode)
@@ -238,7 +246,10 @@ class Chain(object):
                 value=value,
                 data=code,
                 startgas=startgas,
-                gasprice=gasprice)
+                gasprice=gasprice,
+                read_list=read_list,
+                write_list=write_list
+            )
             return ABIContract(self, ct, addr)
 
     def mine(self, number_of_blocks=1, timestamp=14, coinbase=a0):

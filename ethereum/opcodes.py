@@ -101,6 +101,10 @@ GCOPY = 3             # cost to copy one 32 byte word
 GCONTRACTBYTE = 200   # one byte of code in contract creation
 GCALLVALUETRANSFER = 9000   # non-zero-valued call
 GLOGBYTE = 8          # cost of a byte of logdata
+GREADADDRESS = 2000   # Account Redesign: cost to read one address
+GREADBYTE = 3         # Account Redesign: cost to read one byte of data
+GEXPANDBYTE = 300     # Account Redesign: cost to expand one byte in storage
+GACCOUNTEDITCOST = 8000   # Account Redesign: cost to edit the storage of one account the first time in a transaction
 
 GTXCOST = 21000       # TX BASE GAS COST
 GTXDATAZERO = 4       # TX DATA ZERO BYTE GAS COST

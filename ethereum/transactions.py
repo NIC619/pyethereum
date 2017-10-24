@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import rlp
-from rlp.sedes import big_endian_int, binary
+from rlp.sedes import big_endian_int, binary, CountableList
 from rlp.utils import str_to_bytes, ascii_chr
 from ethereum.utils import encode_hex
 
@@ -24,7 +24,7 @@ class Transaction(rlp.Serializable):
 
     """
     A transaction is stored as:
-    [nonce, gasprice, startgas, to, value, data, v, r, s]
+    [nonce, gasprice, startgas, to, value, data, v, r, s, read_list, write_list]
 
     nonce is the number of transactions already sent by that account, encoded
     in binary form (eg.  0 -> '', 7 -> '\x07', 1000 -> '\x03\xd8').
@@ -47,6 +47,8 @@ class Transaction(rlp.Serializable):
         ('to', utils.address),
         ('value', big_endian_int),
         ('data', binary),
+        ('read_list', CountableList(utils.address)),
+        ('write_list', CountableList(utils.address)),
         ('v', big_endian_int),
         ('r', big_endian_int),
         ('s', big_endian_int),
@@ -54,9 +56,13 @@ class Transaction(rlp.Serializable):
 
     _sender = None
 
-    def __init__(self, nonce, gasprice, startgas,
-                 to, value, data, v=0, r=0, s=0):
+    def __init__(self, nonce, gasprice, startgas, to, value, data,
+                 read_list=None, write_list=None, v=0, r=0, s=0):
         self.data = None
+        if not read_list:
+            read_list = []
+        if not write_list:
+            write_list =[]
 
         to = utils.normalize_address(to, allow_blank=True)
 
@@ -69,6 +75,8 @@ class Transaction(rlp.Serializable):
             to,
             value,
             data,
+            read_list,
+            write_list,
             v,
             r,
             s)
@@ -149,6 +157,12 @@ class Transaction(rlp.Serializable):
             d[name] = getattr(self, name)
             if name in ('to', 'data'):
                 d[name] = '0x' + encode_hex(d[name])
+            elif name == 'read_list':
+                d[name] = ['0x' + encode_hex(addr)
+                       for addr in self.read_list]
+            elif name == 'write_list':
+                d[name] = ['0x' + encode_hex(addr)
+                       for addr in self.write_list]
         d['sender'] = '0x' + encode_hex(self.sender)
         d['hash'] = '0x' + encode_hex(self.hash)
         return d
@@ -196,6 +210,9 @@ class Transaction(rlp.Serializable):
     def check_low_s_homestead(self):
         if self.s > secpk1n // 2 or self.s == 0:
             raise InvalidTransaction("Invalid signature S value!")
-
+    
+    @property
+    def read_write_union_list(self):
+        return set(self.read_list).union(self.write_list)
 
 UnsignedTransaction = Transaction.exclude(['v', 'r', 's'])
