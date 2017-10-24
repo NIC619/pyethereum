@@ -199,7 +199,11 @@ def apply_message(state, msg=None, **kwargs):
     return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list) if result else (None, [], [])
 
 
-def apply_transaction(state, tx):
+def apply_transaction(state, _tx, require_rw_list_strict=True):
+    # Avoid altering the actual tx data
+    from copy import copy
+    tx = copy(_tx)
+    
     state.logs = []
     state.suicides = []
     state.refunds = 0
@@ -207,27 +211,29 @@ def apply_transaction(state, tx):
 
     # Apply gas cost of reading accounts in read/write list
     # OPTION1: add msg.sender, msg.to, new contract address to read/write list if not included already
-    if tx.to != b'':
-        tx.read_list = set(tx.read_list) | set([tx.sender, tx.to])
-        tx.write_list = set(tx.write_list) | set([tx.sender, tx.to])
-    else:
-        if state.is_CONSTANTINOPLE():
-            new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
+    if not require_rw_list_strict:
+        if tx.to != b'':
+            tx.read_list = list(set(tx.read_list + [tx.sender, tx.to]))
+            tx.write_list = list(set(tx.write_list + [tx.sender, tx.to]))
         else:
-            new_address = utils.mk_contract_address(tx.sender, tx.nonce)
-        tx.read_list = set(tx.read_list) | set([tx.sender, new_address])
-        tx.write_list = set(tx.write_list) | set([tx.sender, new_address])
+            if state.is_CONSTANTINOPLE():
+                new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
+            else:
+                new_address = utils.mk_contract_address(tx.sender, tx.nonce)
+            tx.read_list = list(set(tx.read_list + [tx.sender, new_address]))
+            tx.write_list = list(set(tx.write_list + [tx.sender, new_address]))
     # OPTION 2: throw excetion directly if these address not included in read/write list
-    # if tx.to != b'':
-    #     if not set([tx.sender, tx.to]).issubset(tx.read_write_union_list):
-    #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
-    # else:
-    #     if state.is_CONSTANTINOPLE():
-    #         new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
-    #     else:
-    #         new_address = utils.mk_contract_address(tx.sender, tx.nonce)
-    #     if not set([tx.sender, new_address]).issubset(tx.read_write_union_list):
-    #         raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
+    else:
+        if tx.to != b'':
+            if not set([tx.sender, tx.to]).issubset(tx.read_write_union_list):
+                raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
+        else:
+            if state.is_CONSTANTINOPLE():
+                new_address = utils.mk_metropolis_contract_address(tx.sender, tx.nonce, tx.data)
+            else:
+                new_address = utils.mk_contract_address(tx.sender, tx.nonce)
+            if not set([tx.sender, new_address]).issubset(tx.read_write_union_list):
+                raise InvalidTransaction("READ/WRITE ACCESS VIOLATION")
 
     intrinsic_gas = tx.intrinsic_gas_used
     # READ_ADDRESS_GAS cost
@@ -382,8 +388,8 @@ class VMExt():
          # self.gathering_mode is used to indicate that vm will be
         # gathering accounts that data are read from/written to.
         self.gathering_mode = False
-        self.read_list = set(tx.read_list) if tx else set()
-        self.write_list = set(tx.write_list) if tx else set()
+        self.read_list = tx.read_list if tx else list()
+        self.write_list = tx.write_list if tx else list()
         self.record_read_list = set()       # list of accounts that data are read from
         self.record_write_list = set()      # list of accounts that data are written to
 

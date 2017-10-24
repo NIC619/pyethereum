@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import rlp
-from rlp.sedes import big_endian_int, binary, Serializable
+from rlp.sedes import big_endian_int, binary, CountableList
 from rlp.utils import str_to_bytes, ascii_chr
 from ethereum.utils import encode_hex
 
@@ -47,8 +47,8 @@ class Transaction(rlp.Serializable):
         ('to', utils.address),
         ('value', big_endian_int),
         ('data', binary),
-        ('read_list', Serializable(utils.address)),
-        ('write_list', Serializable(utils.address)),
+        ('read_list', CountableList(utils.address)),
+        ('write_list', CountableList(utils.address)),
         ('v', big_endian_int),
         ('r', big_endian_int),
         ('s', big_endian_int),
