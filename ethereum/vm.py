@@ -604,6 +604,14 @@ def vm_execute(ext, msg, code):
                 ingas = compustate.gas
                 if ext.post_anti_dos_hardfork():
                     ingas = all_but_1n(ingas, opcodes.CALL_CHILD_LIMIT_DENOM)
+                new_address = utils.mk_contract_address(
+                    msg.to,
+                    ext.get_nonce(msg.to)
+                )
+                if not ext.gathering_mode and new_address not in ext.write_list:
+                    return vm_exception("WRITE ACCESS VIOLATION")
+                if ext.gathering_mode:
+                    ext.record_write_list.add(new_address)
                 create_msg = Message(msg.to, b'', value, ingas, cd, msg.depth + 1)
                 o, gas, data = ext.create(create_msg)
                 if o:
