@@ -143,7 +143,7 @@ class State(object):
         return output
 
     def call(self, sender=k0, to=b'\x00' * 20, value=0, data=b'', startgas=STARTGAS,
-             gasprice=GASPRICE, read_list=None, write_list=None):
+             gasprice=GASPRICE):
         self.state.commit()
         sender_addr = privtoaddr(sender)
         result, r_list, wr_list = apply_message(
@@ -201,7 +201,7 @@ class Chain(object):
         return output
 
     def call(self, sender=k0, to=b'\x00' * 20, value=0, data=b'', startgas=STARTGAS,
-             gasprice=GASPRICE, read_list=None, write_list=None):
+             gasprice=GASPRICE):
         self.head_state.commit()
         sender_addr = privtoaddr(sender)
         result, r_list, wr_list = apply_message(
