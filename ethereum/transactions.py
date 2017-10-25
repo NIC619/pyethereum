@@ -20,11 +20,25 @@ secpk1n = 1157920892373161954235709850086879078528375642790749043826051631415181
 null_address = b'\xff' * 20
 
 
+# class StgKeyList(rlp.Serializable):
+#     fields = [
+#         ('account', utils.address),
+#         ('accessible_storage_key_list', CountableList(utils.hash32))
+#     ]
+
+#     def __init__(self, account, accessible_storage_key_list=None):
+#         if not accessible_storage_key_list:
+#             accessible_storage_key_list = []
+#         for key in accessible_storage_key_list:
+#             assert len(key) == 32
+#         assert len(account) == 20
+#         super(StgKeyList, self).__init__(account, accessible_storage_key_list)
+
 class Transaction(rlp.Serializable):
 
     """
     A transaction is stored as:
-    [nonce, gasprice, startgas, to, value, data, v, r, s, read_list, write_list]
+    [nonce, gasprice, startgas, to, value, data, read_list, write_list, accessible_storage_key_list, v, r, s]
 
     nonce is the number of transactions already sent by that account, encoded
     in binary form (eg.  0 -> '', 7 -> '\x07', 1000 -> '\x03\xd8').
@@ -49,6 +63,7 @@ class Transaction(rlp.Serializable):
         ('data', binary),
         ('read_list', CountableList(utils.address)),
         ('write_list', CountableList(utils.address)),
+        ('accessible_storage_key_list', CountableList(utils.hash52)),
         ('v', big_endian_int),
         ('r', big_endian_int),
         ('s', big_endian_int),
@@ -57,12 +72,15 @@ class Transaction(rlp.Serializable):
     _sender = None
 
     def __init__(self, nonce, gasprice, startgas, to, value, data,
-                 read_list=None, write_list=None, v=0, r=0, s=0):
+                 read_list=None, write_list=None, accessible_storage_key_list=None,
+                 v=0, r=0, s=0):
         self.data = None
         if not read_list:
             read_list = []
         if not write_list:
             write_list =[]
+        if not accessible_storage_key_list:
+            accessible_storage_key_list = []
 
         to = utils.normalize_address(to, allow_blank=True)
 
@@ -77,6 +95,7 @@ class Transaction(rlp.Serializable):
             data,
             read_list,
             write_list,
+            accessible_storage_key_list,
             v,
             r,
             s)
@@ -157,12 +176,13 @@ class Transaction(rlp.Serializable):
             d[name] = getattr(self, name)
             if name in ('to', 'data'):
                 d[name] = '0x' + encode_hex(d[name])
+            if name == 'accessible_storage_key_list':
+                d[name] = [{'0x' + encode_hex(key[:20]): '0x' + encode_hex(key[20:])}
+                          for key in self.accessible_storage_key_list]
             elif name == 'read_list':
-                d[name] = ['0x' + encode_hex(addr)
-                       for addr in self.read_list]
+                d[name] = ['0x' + encode_hex(addr) for addr in self.read_list]
             elif name == 'write_list':
-                d[name] = ['0x' + encode_hex(addr)
-                       for addr in self.write_list]
+                d[name] = ['0x' + encode_hex(addr) for addr in self.write_list]
         d['sender'] = '0x' + encode_hex(self.sender)
         d['hash'] = '0x' + encode_hex(self.hash)
         return d
@@ -210,7 +230,7 @@ class Transaction(rlp.Serializable):
     def check_low_s_homestead(self):
         if self.s > secpk1n // 2 or self.s == 0:
             raise InvalidTransaction("Invalid signature S value!")
-    
+
     @property
     def read_write_union_list(self):
         return set(self.read_list).union(self.write_list)

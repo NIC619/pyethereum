@@ -541,6 +541,7 @@ int20 = BigEndianInt(20)
 int32 = BigEndianInt(32)
 int256 = BigEndianInt(256)
 hash32 = Binary.fixed_length(32)
+hash52 = Binary.fixed_length(52)
 trie_root = Binary.fixed_length(32, allow_empty=True)
 
 

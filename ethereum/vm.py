@@ -519,12 +519,21 @@ def vm_execute(ext, msg, code):
                 if ext.post_anti_dos_hardfork():
                     if not eat_gas(compustate, opcodes.SLOAD_SUPPLEMENTAL_GAS):
                         return vm_exception("OUT OF GAS")
-                stk.append(ext.get_storage_data(msg.to, stk.pop()))
+                storage_key = stk.pop()
+                if not ext.gathering_mode and (msg.to + utils.encode_int32(storage_key)) not in ext.accessible_storage_key_list:
+                    return vm_exception('STORAGE KEY ACCESS VIOLATION')
+                if ext.gathering_mode:
+                    ext.accessed_storage_key_list.add(msg.to + utils.encode_int32(storage_key))
+                stk.append(ext.get_storage_data(msg.to, storage_key))
             elif op == 'SSTORE':
                 s0, s1 = stk.pop(), stk.pop()
                 if msg.static:
                     return vm_exception(
                         'Cannot SSTORE inside a static context')
+                if not ext.gathering_mode and (msg.to + utils.encode_int32(s0)) not in ext.accessible_storage_key_list:
+                    return vm_exception('STORAGE KEY ACCESS VIOLATION')
+                if ext.gathering_mode:
+                    ext.accessed_storage_key_list.add(msg.to + utils.encode_int32(s0))
                 if ext.get_storage_data(msg.to, s0):
                     gascost = opcodes.GSTORAGEMOD if s1 else opcodes.GSTORAGEKILL
                     refund = 0 if s1 else opcodes.GSTORAGEREFUND

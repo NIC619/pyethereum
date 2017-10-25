@@ -196,7 +196,7 @@ def apply_message(state, msg=None, **kwargs):
         ext.record_read_list = set([msg.sender, new_address])
         ext.record_write_list = set([msg.sender, new_address])
         result, gas_remained, data = create_contract(ext, msg)
-    return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list) if result else (None, [], [])
+    return bytearray_to_bytestr(data), list(ext.record_read_list), list(ext.record_write_list), list(ext.accessed_storage_key_list) if result else (None, [], [], [])
 
 
 def apply_transaction(state, _tx, require_rw_list_strict=True):
@@ -392,6 +392,8 @@ class VMExt():
         self.write_list = tx.write_list if tx else list()
         self.record_read_list = set()       # list of accounts that data are read from
         self.record_write_list = set()      # list of accounts that data are written to
+        self.accessed_storage_key_list = set()  # list of accessed (account + storage key) list
+        self.accessible_storage_key_list = tx.accessible_storage_key_list if tx else list()
 
 
 def apply_msg(ext, msg):
