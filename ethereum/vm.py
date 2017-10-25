@@ -374,6 +374,9 @@ def vm_execute(ext, msg, code):
                 if not mem_extend(mem, compustate, op, s0, s1):
                     return vm_exception('OOG EXTENDING MEMORY')
                 data = bytearray_to_bytestr(mem[s0: s0 + s1])
+                print("hashing memory from position %d to position %d" % (s0, s1))
+                print("content of the memory:", data)
+                print("hash of the content: %s\n" % utils.sha3(data))
                 stk.append(utils.big_endian_to_int(utils.sha3(data)))
             elif op == 'ADDRESS':
                 stk.append(utils.coerce_to_int(msg.to))
@@ -502,6 +505,7 @@ def vm_execute(ext, msg, code):
                 if msg.static:
                     return vm_exception(
                         'Cannot SSTORE inside a static context')
+                print("accessing storage with key %s\n" % utils.encode_int32(s0))
                 if ext.get_storage_data(msg.to, s0):
                     gascost = opcodes.GSTORAGEMOD if s1 else opcodes.GSTORAGEKILL
                     refund = 0 if s1 else opcodes.GSTORAGEREFUND
