@@ -41,7 +41,7 @@ def store_merkle_branch_nodes(db, branch):
             raise Exception("Corrupted branch")
         trie.hash_and_save(db, nodes[0])
 
-def mk_account_proof_wrapper(cur_state, blk_header, acct):
+def mk_account_proof_wrapper(cur_state, state_root, acct):
     """Generate a merkle proof wrapper for a given account in a given block
 
     The wrapper includes the
@@ -52,11 +52,13 @@ def mk_account_proof_wrapper(cur_state, blk_header, acct):
     5.indicator of whether the account is newly created
     """
     proof_wrapper = {}
-    proof_wrapper["blk_number"] = blk_header.number
-    proof_wrapper["state_root"] = blk_header.state_root
-    proof_wrapper["acct_rlpdata"] = trie._get(cur_state.trie.db, blk_header.state_root, trie.encode_bin(sha3(acct)))
-    proof_wrapper["merkle_proof"] = get_merkle_proof(cur_state.trie.db, blk_header.state_root, acct)
-    proof_wrapper["code"] = cur_state.get_and_cache_account(acct).code
+    proof_wrapper["acct_rlpdata"] = trie._get(cur_state.trie.db, state_root, trie.encode_bin(sha3(acct)))
+    proof_wrapper["merkle_proof"] = get_merkle_proof(cur_state.trie.db, state_root, acct)
+    from ethereum.state import Account
+    if proof_wrapper["acct_rlpdata"]:
+        proof_wrapper["code"] = rlp.decode(proof_wrapper["acct_rlpdata"], Account, env=cur_state.env, address=acct).code
+    else:
+        proof_wrapper["code"] = b''
     return proof_wrapper
 
 def mk_pending_tx_bundle(cur_state, tx, latest_blk_header):
@@ -68,19 +70,21 @@ def mk_pending_tx_bundle(cur_state, tx, latest_blk_header):
     """
     from ethereum.transactions import Transaction
     tx_bundle = {"tx_rlpdata": rlp.encode(tx, Transaction)}
+    tx_bundle["block_number"] = latest_blk_header.number
+    tx_bundle["state_root"] = latest_blk_header.state_root
     read_list_proof = []
     for acct in tx.read_list:
-        o = mk_account_proof_wrapper(cur_state, latest_blk_header, acct)
+        o = mk_account_proof_wrapper(cur_state, latest_blk_header.state_root, acct)
         read_list_proof.append({acct: o})
     tx_bundle["read_list_proof"] = read_list_proof
     write_list_proof = []
     for acct in tx.write_list:
-        o = mk_account_proof_wrapper(cur_state, latest_blk_header, acct)
+        o = mk_account_proof_wrapper(cur_state, latest_blk_header.state_root, acct)
         write_list_proof.append({acct: o})
     tx_bundle["write_list_proof"] = write_list_proof
     return tx_bundle
 
-def mk_confirmed_tx_bundle(cur_state, tx, prev_blk_header, latest_blk_header, prev_state):
+def mk_confirmed_tx_bundle(cur_state, tx, prev_blk_header, latest_blk_header):
     """Generate transaction bundle for confirmed transaction which includes two part:
     
     1. the first part includes transaction itself, merkle proof for accounts in
@@ -92,24 +96,24 @@ def mk_confirmed_tx_bundle(cur_state, tx, prev_blk_header, latest_blk_header, pr
     for coinbase account and accounts in read/write list so that stateless client
 
     can just update the state trie with this after verifying the proofs
-
-    Note: prev_state is used to retrieve accounts' storage root before transaction execution
     """
     from ethereum.transactions import Transaction
     tx_bundle = {"tx_rlpdata": rlp.encode(tx, Transaction)}
+    tx_bundle["block_number"] = prev_blk_header.number
+    tx_bundle["state_root"] = prev_blk_header.state_root
     read_list_proof = []
     for acct in tx.read_list + (latest_blk_header.coinbase,):
-        o = mk_account_proof_wrapper(cur_state, prev_blk_header, acct)
+        o = mk_account_proof_wrapper(cur_state, prev_blk_header.state_root, acct)
         read_list_proof.append({acct: o})
     tx_bundle["read_list_proof"] = read_list_proof
     write_list_proof = []
     for acct in tx.write_list + (latest_blk_header.coinbase,):
-        o = mk_account_proof_wrapper(cur_state, prev_blk_header, acct)
+        o = mk_account_proof_wrapper(cur_state, prev_blk_header.state_root, acct)
         write_list_proof.append({acct: o})
     tx_bundle["write_list_proof"] = write_list_proof
     updated_acct_list = []
     for acct in tx.read_write_union_list | set(latest_blk_header.coinbase):
-        o = mk_account_proof_wrapper(cur_state, latest_blk_header, acct)
+        o = mk_account_proof_wrapper(cur_state, latest_blk_header.state_root, acct)
         updated_acct_list.append({acct: o})
     tx_bundle["updated_acct_proof"] = updated_acct_list
     return tx_bundle
@@ -125,10 +129,10 @@ def verify_tx_bundle(env, state_root, coinbase, tx_bundle):
     ephem_state.block_coinbase = coinbase
 
     # Verify merkle proofs and store the nodes in state trie
+    assert state_root == tx_bundle["state_root"]
     for acct_proof_wrapper in tx_bundle["read_list_proof"]:
         for acct, wrapper in acct_proof_wrapper.items():
-            assert state_root == wrapper["state_root"]
-            assert verify_merkle_proof(wrapper["merkle_proof"], wrapper["state_root"], sha3(acct), wrapper["acct_rlpdata"])
+            assert verify_merkle_proof(wrapper["merkle_proof"], tx_bundle["state_root"], sha3(acct), wrapper["acct_rlpdata"])
             # Store the account data after verifying the proof
             if wrapper["code"]:
                 ephem_state.env.db.put(sha3(wrapper["code"]), wrapper["code"])
@@ -136,8 +140,7 @@ def verify_tx_bundle(env, state_root, coinbase, tx_bundle):
     # Do the same to write list proof
     for acct_proof_wrapper in tx_bundle["write_list_proof"]:
         for acct, wrapper in acct_proof_wrapper.items():
-            assert state_root == wrapper["state_root"]
-            assert verify_merkle_proof(wrapper["merkle_proof"], wrapper["state_root"], sha3(acct), wrapper["acct_rlpdata"])
+            assert verify_merkle_proof(wrapper["merkle_proof"], tx_bundle["state_root"], sha3(acct), wrapper["acct_rlpdata"])
             # Store the account data after verifying the proof
             if wrapper["code"]:
                 ephem_state.env.db.put(sha3(wrapper["code"]), wrapper["code"])
