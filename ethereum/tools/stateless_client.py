@@ -155,3 +155,42 @@ def verify_tx_bundle(env, state_root, coinbase, tx_bundle):
     from ethereum.transactions import Transaction
     success, _ = apply_transaction(ephem_state, rlp.decode(tx_bundle["tx_rlpdata"], Transaction))
     return success
+
+def group_txs(txs):
+    groups = []
+    current_set = set()
+    current_group = []
+    for tx in txs:
+        # If accounts in tx's read/write list overlap 
+        # account's in current tx group's read/write list,
+        # end the current group and start a new one
+        if not (tx.read_write_union_list.isdisjoint(current_set)):
+            groups.append(current_group)
+            current_set = tx.read_write_union_list
+            current_group = [tx]
+        else:
+            current_group.append(tx)
+            current_set |= tx.read_write_union_list
+    groups.append(current_group)
+    return groups
+
+def attach_tx_bundles_to_txs_in_block(state, prev_block_header, target_block):
+    from ethereum.messages import apply_transaction
+    from ethereum.transactions import Transaction
+    block_number = prev_block_header.number
+
+    tx_bundle_list = []
+    grouped_txs = group_txs(target_block.transactions)
+    for i, group in enumerate(grouped_txs):
+        for tx in group:
+            tx_bundle_list.append(
+                mk_confirmed_tx_bundle(state, tx, block_number,
+                    state.trie.root_hash, target_block.header.state_root, target_block.header.coinbase))
+            success, _ = apply_transaction(state, tx)
+            assert success
+        # Commit txs to get the intermediate state root between each group
+        state.commit()
+        # Mark the block number as -1 if proof is calculated base on intermediate state root
+        if i == 0:
+            block_number = -1
+    target_block.tx_bundle_list = tx_bundle_list
